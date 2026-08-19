@@ -173,9 +173,10 @@ const APELIDOS      = { "0xSUA_CONTA_A": "Hugo", "0xSUA_CONTA_B": "Ana" };
 Abrir o arquivo no navegador — dois cliques, não precisa de servidor. A página
 mostra o pote, o líder, o tempo restante da época e as duas classificações.
 
-**Publicar (opcional, ~2 minutos):** no repositório do GitHub, *Settings* →
-*Pages* → *Deploy from a branch* → `main` / `/ (root)`. O ranking passa a ter
-URL pública, e ela entra no README e no vídeo.
+**Já está publicado** em https://hugofmontan.github.io/intelibet/ — o GitHub Pages serve o
+repositório e a raiz redireciona para `ranking/`. Depois de editar as constantes,
+faça `git add -A && git commit && git push`: em um ou dois minutos a página no ar
+reflete a mudança.
 
 Se a página não carregar: o RPC público pode estar fora. Trocar a constante
 `RPC` por `https://rpc.sepolia.org` ou `https://sepolia.drpc.org` resolve —
@@ -215,7 +216,7 @@ sacar o pote". As duas afirmações só são verificáveis com o código publica
 | **Tx `claimPrize`** | `0x` |
 | Conta A (tesouraria) | `0x` |
 | Conta B | `0x` |
-| URL do ranking (GitHub Pages) | |
+| URL do ranking (GitHub Pages) | https://hugofmontan.github.io/intelibet/ |
 | Código verificado no Etherscan | [ ] sim / [ ] não |
 | Data/hora do deploy | |
 

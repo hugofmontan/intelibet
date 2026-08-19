@@ -115,6 +115,8 @@ entender do que saldo líquido. A página mostra os dois.
 
 ## O ranking
 
+**Ao vivo: https://hugofmontan.github.io/intelibet/**
+
 [`ranking/index.html`](ranking/index.html) é um arquivo só. Lê **on-chain** o que
 é autoritativo — época, pote, líder, tempo restante — e **dos eventos** o
 histórico completo de apostas.
@@ -162,7 +164,7 @@ fechar mais estão em [`docs/modelagem.md §7`](docs/modelagem.md).
 | **Tx de transferência entre carteiras** | `0x` |
 | Tx `settleBet` | `0x` |
 | Tx `claimPrize` | `0x` |
-| Ranking publicado | *URL* |
+| Ranking publicado | https://hugofmontan.github.io/intelibet/ |
 | Vídeo (≤ 10 min) | *link* |
 
 ---
