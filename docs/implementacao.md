@@ -3,6 +3,7 @@
 | Peça | Papel | Arquivo |
 |---|---|---|
 | **InteliBet** | o token ERC-20 — a entrega | [`contracts/InteliBet.sol`](../contracts/InteliBet.sol) |
+| **InteliBetNames** | registro de nomes do painel — contrato à parte | [`contracts/InteliBetNames.sol`](../contracts/InteliBetNames.sol) |
 | **Ranking** | página estática que lê os eventos e mostra pote, líder e classificação | [`ranking/index.html`](../ranking/index.html) |
 
 Compilador: **Solidity ^0.8.20** · Biblioteca: **OpenZeppelin Contracts v5.x**
@@ -239,6 +240,49 @@ feed das últimas apostas com valor, taxa e link para a transação.
 
 **Configuração** — duas linhas no topo do `<script>`: `CONTRATO` e
 `BLOCO_INICIAL`, mais o mapa opcional de `APELIDOS`.
+
+---
+
+## 9b. O registro de nomes
+
+A blockchain só conhece endereços. Para o painel mostrar "Hugo" em vez de
+`0xf6e3…eaf0`, alguém precisa gravar essa associação em algum lugar.
+
+**Por que um contrato separado.** O InteliBet não tem nada a ver com nomes.
+Colocar `setName` dentro do token amarraria o dinheiro da comunidade a uma
+funcionalidade cosmética e obrigaria a republicar o token — perdendo reserva
+atestada, emissão e endereço — para mudar qualquer coisa nessa parte. É a mesma
+separação de responsabilidades que já tinha tirado o escrow de dentro do token.
+
+```solidity
+function setName(string calldata name) external {
+    uint256 len = bytes(name).length;
+    if (len == 0 || len > MAX_NAME_LENGTH) revert InvalidName(len, MAX_NAME_LENGTH);
+    _names[msg.sender] = name;
+    emit NameSet(msg.sender, name);
+}
+```
+
+- **`msg.sender` é a chave.** Ninguém consegue nomear outra pessoa — só você
+  assina pela sua carteira. O registro continua auto-declarado (nada impede
+  alguém de se chamar "Presidente"), mas a garantia que existe é clara e
+  honesta: o nome exibido é sempre o que aquele endereço escolheu para si.
+- **Sem owner, sem moderação, sem taxa.** Quem publica o contrato não ganha
+  poder nenhum sobre ele.
+- **`namesOf(address[])` em lote** — o painel precisa dos nomes de todos os
+  participantes; uma chamada evita N idas ao nó.
+- **`clearName()`** devolve o endereço ao anonimato.
+
+### Um detalhe de segurança que o registro cria
+
+Nome é **string escrita por usuário** e vai parar no HTML do painel. Sem
+tratamento, alguém registraria `<img src=x onerror=...>` e executaria script na
+página de todo mundo. Por isso o nome passa por `escapar()` antes de ser
+inserido — a mesma função que já tratava a descrição das apostas.
+
+É o tipo de coisa que só aparece quando dado de terceiro entra na tela: o
+ranking anterior lia apenas números e endereços, formatos que não carregam
+código.
 
 ---
 

@@ -94,6 +94,8 @@
       Montado direto da blockchain. Cada linha vem de um evento
       <code>BetSettled</code> na rede Sepolia — nada aqui é digitado à mão.
       5% de cada aposta paga vai para o pote da época; quem mais ganhar leva.
+      Os nomes são auto-declarados — cada pessoa registra o próprio, e ninguém
+      consegue nomear outra.
     </p>
   </header>
 
@@ -129,8 +131,9 @@ const CONTRATO      = "0xb7d8997c47d159b61ca0e9dc90fd72a1f68b1752"; // InteliBet
 const BLOCO_INICIAL = 11524524;   // bloco do deploy
 const RPC           = "https://ethereum-sepolia-rpc.publicnode.com";
 const EXPLORER      = "https://sepolia.etherscan.io";
+const REGISTRO      = "0x0000000000000000000000000000000000000000"; // InteliBetNames
 
-// Opcional: troca endereço por nome na tela.
+// Fallback: usado só para quem ainda não registrou o nome on-chain.
 const APELIDOS = {
   "0xf6e3a81cf77979eeac3874fc8245573c92e8eaf0": "Hugo",
   // Adicione a Conta B aqui, em minúsculas:
@@ -148,6 +151,10 @@ const ABI = [
   "function minDistinctOpponents() view returns (uint32)"
 ];
 
+const ABI_NOMES = [
+  "function namesOf(address[] accounts) view returns (string[])"
+];
+
 const DECIMAIS = 2;
 const VAZIO = "0x0000000000000000000000000000000000000000";
 
@@ -155,14 +162,32 @@ const $ = (id) => document.getElementById(id);
 const brl = (base) => (Number(base) / 10 ** DECIMAIS)
   .toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const curto = (a) => a.slice(0, 6) + "…" + a.slice(-4);
-const nome  = (a) => APELIDOS[a] || APELIDOS[a.toLowerCase()] || null;
+let NOMES_ONCHAIN = {};   // preenchido a cada carga, lendo o InteliBetNames
+const nome = (a) => {
+  const k = a.toLowerCase();
+  return NOMES_ONCHAIN[k] || APELIDOS[a] || APELIDOS[k] || null;
+};
 
 function linkConta(a) {
   const apelido = nome(a);
   const label = apelido
-    ? `<span class="who">${apelido}</span> <span class="addr">${curto(a)}</span>`
+    ? `<span class="who">${escapar(apelido)}</span> <span class="addr">${curto(a)}</span>`
     : `<span class="addr">${curto(a)}</span>`;
   return `<a href="${EXPLORER}/address/${a}" target="_blank" rel="noopener">${label}</a>`;
+}
+
+/** Lê os nomes registrados on-chain, em uma única chamada em lote. */
+async function carregarNomes(provider, enderecos) {
+  NOMES_ONCHAIN = {};
+  if (/^0x0{40}$/i.test(REGISTRO) || !enderecos.length) return;
+
+  try {
+    const registro = new ethers.Contract(REGISTRO, ABI_NOMES, provider);
+    const nomes = await registro.namesOf(enderecos);
+    enderecos.forEach((a, i) => { if (nomes[i]) NOMES_ONCHAIN[a.toLowerCase()] = nomes[i]; });
+  } catch (erro) {
+    console.warn("registro de nomes indisponível, usando o mapa local:", erro);
+  }
 }
 
 function escapar(s) {
@@ -332,6 +357,8 @@ async function carregar() {
       description: l.args.description,
       tx: l.transactionHash,
     }));
+
+    await carregarNomes(provider, [...new Set(apostas.flatMap((b) => [b.winner, b.loser]))]);
 
     pintarEstatisticas(apostas, { epoca, pote, lider, fimEpoca });
     pintarEpoca(apurarEpoca(apostas, epoca), Number(minimo));

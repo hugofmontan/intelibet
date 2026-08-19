@@ -19,6 +19,7 @@ ganhou leva o pote inteiro**.
 | [`docs/deploy.md`](docs/deploy.md) | Passo a passo Sepolia + evidências on-chain |
 | [`docs/uso-de-ia.md`](docs/uso-de-ia.md) | Prompts usados, o que foi aceito e o que foi rejeitado |
 | [`contracts/InteliBet.sol`](contracts/InteliBet.sol) | O token ERC-20 |
+| [`contracts/InteliBetNames.sol`](contracts/InteliBetNames.sol) | Registro de nomes do painel — contrato separado |
 | [`ranking/index.html`](ranking/index.html) | Pote, líder e classificação, lidos direto da blockchain |
 | [`ROTEIRO-VIDEO.md`](ROTEIRO-VIDEO.md) | Roteiro cronometrado da demonstração |
 
@@ -164,6 +165,7 @@ fechar mais estão em [`docs/modelagem.md §7`](docs/modelagem.md).
 | **Tx de transferência entre carteiras** | `0x` |
 | Tx `settleBet` | `0x` |
 | Tx `claimPrize` | `0x` |
+| `InteliBetNames` | `0x` |
 | Ranking publicado | https://hugofmontan.github.io/intelibet/ |
 | Vídeo (≤ 10 min) | *link* |
 
