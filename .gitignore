@@ -1,0 +1,17 @@
+# Windows / OneDrive
+Thumbs.db
+desktop.ini
+*.tmp
+
+# macOS
+.DS_Store
+
+# Editores
+.vscode/
+.idea/
+
+# Artefatos de build (caso entre Hardhat/Foundry no futuro)
+node_modules/
+artifacts/
+cache/
+out/

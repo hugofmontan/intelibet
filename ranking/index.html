@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INTELIBET — Ranking de apostas</title>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+
+<style>
+  :root {
+    --bg: #fbfbfa;      --card: #ffffff;   --ink: #1a1a18;
+    --muted: #6b6b66;   --line: #e6e4df;   --accent: #b4581f;
+    --pos: #1f7a4d;     --neg: #a03030;    --pot: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a;    --card: #1e1e23;   --ink: #eceae6;
+      --muted: #9a978f; --line: #32323a;   --accent: #e08d4f;
+      --pos: #4fbe86;   --neg: #e07070;    --pot: #e8b45a;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem 4rem;
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+
+  header { margin-bottom: 1.5rem; }
+  h1 { margin: 0 0 .3rem; font-size: 1.75rem; letter-spacing: -.02em; }
+  .sub { color: var(--muted); margin: 0; font-size: .95rem; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.5rem 0; }
+  .stat {
+    flex: 1 1 150px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: .85rem 1rem;
+  }
+  .stat b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+  .stat.destaque { border-color: var(--pot); }
+  .stat.destaque b { color: var(--pot); }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; overflow: hidden; margin-bottom: 1.5rem;
+  }
+  .card h2 {
+    margin: 0; padding: .9rem 1.1rem; font-size: .82rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+  .card h2 small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .scroll { overflow-x: auto; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .93rem; }
+  th, td { padding: .7rem 1.1rem; text-align: left; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pos { color: var(--pos); } .neg { color: var(--neg); }
+  .rank { width: 2.5rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .who { font-weight: 600; }
+  .addr { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .78rem; color: var(--muted); }
+  .terms { color: var(--muted); }
+  .tag {
+    font-size: .7rem; padding: .1rem .45rem; border-radius: 20px;
+    border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
+  }
+  .tag.ok { color: var(--pos); border-color: var(--pos); }
+
+  .msg { padding: 2rem 1.1rem; text-align: center; color: var(--muted); }
+  .msg code, .sub code {
+    font-family: ui-monospace, Menlo, monospace; font-size: .85rem;
+    background: var(--bg); padding: .1rem .35rem; border-radius: 4px;
+  }
+  footer { color: var(--muted); font-size: .82rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+  button {
+    font: inherit; font-size: .85rem; padding: .35rem .85rem; cursor: pointer;
+    background: var(--card); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 7px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>INTELIBET — quem mais ganha aposta</h1>
+    <p class="sub">
+      Montado direto da blockchain. Cada linha vem de um evento
+      <code>BetSettled</code> na rede Sepolia — nada aqui é digitado à mão.
+      5% de cada aposta paga vai para o pote da época; quem mais ganhar leva.
+    </p>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="card">
+    <h2>Classificação da época <small id="tituloEpoca"></small></h2>
+    <div class="scroll"><div id="epoca"><p class="msg">Carregando…</p></div></div>
+  </div>
+
+  <div class="card">
+    <h2>Geral <small>— todas as épocas</small></h2>
+    <div class="scroll"><div id="geral"></div></div>
+  </div>
+
+  <div class="card">
+    <h2>Apostas pagas</h2>
+    <div class="scroll"><div id="feed"></div></div>
+  </div>
+
+  <footer>
+    <button id="reload">Atualizar</button>
+    <span id="status"></span>
+  </footer>
+</main>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────
+//  CONFIGURAÇÃO — preencher depois do deploy
+// ─────────────────────────────────────────────────────────────────────
+
+const CONTRATO      = "0x0000000000000000000000000000000000000000"; // endereço do InteliBet
+const BLOCO_INICIAL = 0;          // bloco do deploy (Etherscan → tx de criação)
+const RPC           = "https://ethereum-sepolia-rpc.publicnode.com";
+const EXPLORER      = "https://sepolia.etherscan.io";
+
+// Opcional: troca endereço por nome na tela.
+const APELIDOS = {
+  // "0x5f2a...c31": "Hugo",
+  // "0x9b04...7de": "Ana",
+};
+
+// ─────────────────────────────────────────────────────────────────────
+
+const ABI = [
+  "event BetSettled(address indexed loser, address indexed winner, uint256 amount, uint256 fee, uint256 indexed epoch, string description)",
+  "function currentEpoch() view returns (uint256)",
+  "function epochEndsAt(uint256) view returns (uint256)",
+  "function prizePool(uint256) view returns (uint256)",
+  "function epochLeader(uint256) view returns (address)",
+  "function minDistinctOpponents() view returns (uint32)"
+];
+
+const DECIMAIS = 2;
+const VAZIO = "0x0000000000000000000000000000000000000000";
+
+const $ = (id) => document.getElementById(id);
+const brl = (base) => (Number(base) / 10 ** DECIMAIS)
+  .toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const curto = (a) => a.slice(0, 6) + "…" + a.slice(-4);
+const nome  = (a) => APELIDOS[a] || APELIDOS[a.toLowerCase()] || null;
+
+function linkConta(a) {
+  const apelido = nome(a);
+  const label = apelido
+    ? `<span class="who">${apelido}</span> <span class="addr">${curto(a)}</span>`
+    : `<span class="addr">${curto(a)}</span>`;
+  return `<a href="${EXPLORER}/address/${a}" target="_blank" rel="noopener">${label}</a>`;
+}
+
+function escapar(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function faltam(segundos) {
+  if (segundos <= 0) return "encerrada";
+  const d = Math.floor(segundos / 86400);
+  const h = Math.floor((segundos % 86400) / 3600);
+  const m = Math.floor((segundos % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}min`;
+  return `${m}min`;
+}
+
+/** Placar da época: bruto ganho e adversários distintos — a mesma regra do contrato. */
+function apurarEpoca(apostas, epoca) {
+  const contas = new Map();
+  for (const b of apostas.filter((x) => x.epoch === epoca)) {
+    if (!contas.has(b.winner)) contas.set(b.winner, { addr: b.winner, bruto: 0n, adversarios: new Set() });
+    const c = contas.get(b.winner);
+    c.bruto += b.amount;
+    c.adversarios.add(b.loser);
+  }
+  return [...contas.values()].sort((a, b) => (b.bruto > a.bruto ? 1 : b.bruto < a.bruto ? -1 : 0));
+}
+
+/** Placar geral: ganhas, perdidas e saldo líquido de todas as épocas. */
+function apurarGeral(apostas) {
+  const contas = new Map();
+  const pega = (a) => {
+    if (!contas.has(a)) contas.set(a, { addr: a, ganhas: 0, perdidas: 0, recebido: 0n, pago: 0n });
+    return contas.get(a);
+  };
+  for (const b of apostas) {
+    const v = pega(b.winner); v.ganhas++;   v.recebido += b.amount - b.fee;
+    const p = pega(b.loser);  p.perdidas++; p.pago     += b.amount;
+  }
+  return [...contas.values()]
+    .map((c) => ({ ...c, saldo: c.recebido - c.pago }))
+    .sort((a, b) => (b.saldo > a.saldo ? 1 : b.saldo < a.saldo ? -1 : b.ganhas - a.ganhas));
+}
+
+function pintarEstatisticas(apostas, chain) {
+  const taxas = apostas.reduce((s, b) => s + b.fee, 0n);
+  const restante = Number(chain.fimEpoca) - Math.floor(Date.now() / 1000);
+  const lider = chain.lider === VAZIO ? "—" : (nome(chain.lider) || curto(chain.lider));
+  const cartao = (rotulo, valor, classe = "") =>
+    `<div class="stat ${classe}"><b>${valor}</b><span>${rotulo}</span></div>`;
+
+  $("stats").innerHTML =
+    cartao("pote da época", brl(chain.pote) + " IBET", "destaque") +
+    cartao("líder da época", lider) +
+    cartao("época termina em", faltam(restante)) +
+    cartao("apostas pagas", apostas.length) +
+    cartao("taxas acumuladas", brl(taxas));
+
+  $("tituloEpoca").textContent = `— nº ${chain.epoca}`;
+}
+
+function pintarEpoca(contas, minimo) {
+  if (!contas.length) {
+    $("epoca").innerHTML = `<p class="msg">Nenhuma aposta paga nesta época ainda.</p>`;
+    return;
+  }
+
+  const medalha = ["🥇", "🥈", "🥉"];
+  const linhas = contas.map((c, i) => {
+    const elegivel = c.adversarios.size >= minimo;
+    return `
+    <tr>
+      <td class="rank">${medalha[i] || i + 1}</td>
+      <td>${linkConta(c.addr)}</td>
+      <td class="num">${brl(c.bruto)}</td>
+      <td class="num">${c.adversarios.size}</td>
+      <td><span class="tag ${elegivel ? "ok" : ""}">${elegivel ? "concorre" : `faltam ${minimo - c.adversarios.size}`}</span></td>
+    </tr>`;
+  }).join("");
+
+  $("epoca").innerHTML = `
+    <table>
+      <thead><tr>
+        <th></th><th>Pessoa</th>
+        <th class="num">Ganho bruto</th><th class="num">Adversários</th><th>Prêmio</th>
+      </tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>`;
+}
+
+function pintarGeral(contas) {
+  if (!contas.length) { $("geral").innerHTML = `<p class="msg">—</p>`; return; }
+
+  const linhas = contas.map((c, i) => `
+    <tr>
+      <td class="rank">${i + 1}</td>
+      <td>${linkConta(c.addr)}</td>
+      <td class="num">${c.ganhas}</td>
+      <td class="num">${c.perdidas}</td>
+      <td class="num ${c.saldo >= 0n ? "pos" : "neg"}">
+        ${c.saldo >= 0n ? "+" : "−"}${brl(c.saldo < 0n ? -c.saldo : c.saldo)}
+      </td>
+    </tr>`).join("");
+
+  $("geral").innerHTML = `
+    <table>
+      <thead><tr>
+        <th></th><th>Pessoa</th>
+        <th class="num">Ganhas</th><th class="num">Perdidas</th><th class="num">Saldo (IBET)</th>
+      </tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>`;
+}
+
+function pintarFeed(apostas) {
+  if (!apostas.length) { $("feed").innerHTML = `<p class="msg">—</p>`; return; }
+
+  const linhas = [...apostas].reverse().slice(0, 25).map((b) => `
+    <tr>
+      <td>${linkConta(b.winner)}</td>
+      <td class="terms">${escapar(b.description)}</td>
+      <td class="num pos">${brl(b.amount)}</td>
+      <td class="num terms">−${brl(b.fee)}</td>
+      <td class="num"><a href="${EXPLORER}/tx/${b.tx}" target="_blank" rel="noopener">ver tx</a></td>
+    </tr>`).join("");
+
+  $("feed").innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Ganhou</th><th>Aposta</th>
+        <th class="num">Valor</th><th class="num">Taxa</th><th></th>
+      </tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>`;
+}
+
+async function carregar() {
+  $("status").textContent = "consultando a Sepolia…";
+
+  if (/^0x0{40}$/i.test(CONTRATO)) {
+    $("epoca").innerHTML = `<p class="msg">
+      Preencha <code>CONTRATO</code> e <code>BLOCO_INICIAL</code> no topo do
+      &lt;script&gt; depois do deploy.</p>`;
+    $("status").textContent = "";
+    return;
+  }
+
+  try {
+    const provider = new ethers.JsonRpcProvider(RPC);
+    const contrato = new ethers.Contract(CONTRATO, ABI, provider);
+
+    const epoca = await contrato.currentEpoch();
+    const [pote, lider, fimEpoca, minimo] = await Promise.all([
+      contrato.prizePool(epoca),
+      contrato.epochLeader(epoca),
+      contrato.epochEndsAt(epoca),
+      contrato.minDistinctOpponents(),
+    ]);
+
+    const logs = await contrato.queryFilter(contrato.filters.BetSettled(), BLOCO_INICIAL, "latest");
+    const apostas = logs.map((l) => ({
+      loser: l.args.loser,
+      winner: l.args.winner,
+      amount: l.args.amount,
+      fee: l.args.fee,
+      epoch: l.args.epoch,
+      description: l.args.description,
+      tx: l.transactionHash,
+    }));
+
+    pintarEstatisticas(apostas, { epoca, pote, lider, fimEpoca });
+    pintarEpoca(apurarEpoca(apostas, epoca), Number(minimo));
+    pintarGeral(apurarGeral(apostas));
+    pintarFeed(apostas);
+
+    $("status").textContent =
+      `${apostas.length} evento(s) lido(s) · atualizado ${new Date().toLocaleString("pt-BR")}`;
+  } catch (erro) {
+    $("epoca").innerHTML = `<p class="msg">Não consegui ler a rede: ${escapar(String(erro.message || erro))}</p>`;
+    $("status").textContent = "";
+  }
+}
+
+$("reload").addEventListener("click", carregar);
+carregar();
+</script>
+</body>
+</html>
