@@ -3,11 +3,10 @@
 | Peça | Papel | Arquivo |
 |---|---|---|
 | **InteliBet** | o token ERC-20 — a entrega | [`contracts/InteliBet.sol`](../contracts/InteliBet.sol) |
-| **InteliBetNames** | registro de nomes do painel — contrato à parte | [`contracts/InteliBetNames.sol`](../contracts/InteliBetNames.sol) |
 | **Ranking** | página estática que lê os eventos e mostra pote, líder e classificação | [`ranking/index.html`](../ranking/index.html) |
 
 Compilador: **Solidity ^0.8.20** · Biblioteca: **OpenZeppelin Contracts v5.x**
-Um contrato, cerca de 330 linhas com comentários.
+**Um contrato, um arquivo** — cerca de 400 linhas com comentários.
 
 ---
 
@@ -243,16 +242,10 @@ feed das últimas apostas com valor, taxa e link para a transação.
 
 ---
 
-## 9b. O registro de nomes
+## 9b. Identidade: `setName`
 
 A blockchain só conhece endereços. Para o painel mostrar "Hugo" em vez de
-`0xf6e3…eaf0`, alguém precisa gravar essa associação em algum lugar.
-
-**Por que um contrato separado.** O InteliBet não tem nada a ver com nomes.
-Colocar `setName` dentro do token amarraria o dinheiro da comunidade a uma
-funcionalidade cosmética e obrigaria a republicar o token — perdendo reserva
-atestada, emissão e endereço — para mudar qualquer coisa nessa parte. É a mesma
-separação de responsabilidades que já tinha tirado o escrow de dentro do token.
+`0xf6e3…eaf0`, alguém precisa gravar essa associação.
 
 ```solidity
 function setName(string calldata name) external {
@@ -265,23 +258,34 @@ function setName(string calldata name) external {
 
 - **`msg.sender` é a chave.** Ninguém consegue nomear outra pessoa — só você
   assina pela sua carteira. O registro continua auto-declarado (nada impede
-  alguém de se chamar "Presidente"), mas a garantia que existe é clara e
-  honesta: o nome exibido é sempre o que aquele endereço escolheu para si.
-- **Sem owner, sem moderação, sem taxa.** Quem publica o contrato não ganha
-  poder nenhum sobre ele.
+  alguém de se chamar "Presidente"), mas a garantia é clara: o nome exibido é
+  sempre o que aquele endereço escolheu para si.
+- **A tesouraria não tem poder aqui.** `setName` e `clearName` não são
+  `onlyOwner`: o owner não altera nem apaga o nome de ninguém.
 - **`namesOf(address[])` em lote** — o painel precisa dos nomes de todos os
   participantes; uma chamada evita N idas ao nó.
-- **`clearName()`** devolve o endereço ao anonimato.
 
-### Um detalhe de segurança que o registro cria
+### Por que dentro do token, e o que isso custa
+
+A separação em dois contratos seria a arquitetura mais limpa: nome não é
+assunto de um ERC-20. A escolha foi pelo arquivo único, e o motivo é
+operacional — **um deploy, um endereço, verificação single-file**. Numa entrega
+que precisa ser publicada, demonstrada em vídeo e conferida por outra pessoa,
+cada contrato a mais é mais uma coisa que pode sair do lugar.
+
+O custo está declarado: **mudar qualquer coisa no registro de nomes passa a
+exigir republicar o token**, perdendo reserva atestada, emissão e endereço. É
+um custo aceitável para um registro que é cosmético e estável.
+
+### Um detalhe de segurança que os nomes criam
 
 Nome é **string escrita por usuário** e vai parar no HTML do painel. Sem
 tratamento, alguém registraria `<img src=x onerror=...>` e executaria script na
 página de todo mundo. Por isso o nome passa por `escapar()` antes de ser
 inserido — a mesma função que já tratava a descrição das apostas.
 
-É o tipo de coisa que só aparece quando dado de terceiro entra na tela: o
-ranking anterior lia apenas números e endereços, formatos que não carregam
+É o tipo de coisa que só aparece quando dado livre de terceiro entra na tela: o
+painel anterior lia apenas números e endereços, formatos que não carregam
 código.
 
 ---

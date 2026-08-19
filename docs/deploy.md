@@ -100,6 +100,19 @@ Os passos 1 e 6 são o coração da entrega. Não pule nenhum dos dois na grava�
 Se não funcionar, `emn178.github.io/online-tools/keccak_256.html` — qualquer
 bytes32 válido serve para a demonstração.
 
+### 3.1b Registrar os nomes do painel
+
+Cada conta registra o próprio nome — `msg.sender` é a chave, então ninguém
+nomeia outra pessoa. A Conta B precisa ter ETH de teste para isso.
+
+| # | Chamada | Conta |
+|---|---|---|
+| 6b | `setName` → `Hugo` | A |
+| 6c | `setName` → `Ana` | B |
+
+Sem texto entre aspas nos campos expandidos do Remix. Quem não registrar
+continua aparecendo no ranking, só que pelo endereço abreviado.
+
 ### 3.2 Transferência entre carteiras (item exigido pelo enunciado)
 
 | # | Chamada | Conta | Resultado |

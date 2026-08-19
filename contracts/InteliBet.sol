@@ -11,7 +11,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  *         da comunidade. A aposta e feita hoje e paga depois, entao o valor
  *         apostado precisa significar a mesma coisa nos dois momentos.
  *
- * @dev    Tres coisas sustentam este contrato:
+ * @dev    Quatro mecanismos, num contrato so:
  *
  *         1. O PEG, por uma invariante que o contrato recusa violar:
  *
@@ -38,11 +38,14 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  *            A taxa NAO incide sobre `transfer`: um ERC-20 que entrega menos
  *            do que foi mandado quebra carteira, exchange e qualquer contrato
  *            que faca conta antes de transferir. Aposta paga tem rake;
- *            mandar dinheiro para um amigo nao e aposta e nao paga nada.
+ *            mandar dinheiro para um amigo nao paga nada.
  *
  *            A taxa tambem NAO afeta o peg: o valor sai de uma conta e entra
- *            na do proprio contrato. O supply nao muda, e a invariante do
- *            item 1 continua valendo.
+ *            na do proprio contrato. O supply nao muda.
+ *
+ *         4. A IDENTIDADE, por `setName`. A blockchain so conhece enderecos;
+ *            o painel precisa de nomes. Cada pessoa registra o PROPRIO nome,
+ *            com `msg.sender` como chave — ninguem nomeia outra pessoa.
  *
  *         Nao ha custodia nem arbitro. Divida de aposta nao e exigivel em
  *         juizo (art. 814 do Codigo Civil), entao a garantia aqui e
@@ -60,6 +63,9 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
 
     /// @notice Limite do texto da aposta, para o evento nao virar deposito de lixo.
     uint256 public constant MAX_DESCRIPTION_LENGTH = 200;
+
+    /// @notice Limite do nome, para o painel nao quebrar.
+    uint256 public constant MAX_NAME_LENGTH = 24;
 
     // --- Parametros do premio --------------------------------------------
 
@@ -121,6 +127,11 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
     /// @dev Marca se `winner` ja venceu `loser` naquela epoca.
     mapping(uint256 => mapping(address => mapping(address => bool))) private _alreadyBeat;
 
+    // --- Identidade ------------------------------------------------------
+
+    /// @dev Nome escolhido por cada endereco. Vazio quando nao registrado.
+    mapping(address => string) private _names;
+
     // --- Eventos ---------------------------------------------------------
 
     event ReserveAttested(uint256 amount, bytes32 proofHash, uint64 at);
@@ -148,12 +159,16 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
     event PrizeClaimed(uint256 indexed epoch, address indexed winner, uint256 amount);
     event PrizeRolledOver(uint256 indexed epoch, uint256 amount, uint256 toEpoch);
 
+    event NameSet(address indexed account, string name);
+    event NameCleared(address indexed account);
+
     // --- Erros -----------------------------------------------------------
 
     error ReserveInsufficient(uint256 supplyAfter, uint256 reserves);
     error StaleAttestation(uint64 attestedAt, uint64 maxAge);
     error InvalidCounterparty();
     error InvalidDescription(uint256 length, uint256 max);
+    error InvalidName(uint256 length, uint256 max);
     error AmountTooSmall(uint256 amount, uint256 minimum);
     error EpochNotFinished(uint256 epoch, uint256 current);
     error PrizeAlreadySettled(uint256 epoch);
@@ -248,6 +263,50 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
 
         _burn(msg.sender, amount);
         emit RedemptionRequested(msg.sender, amount, payoutRef);
+    }
+
+    // --- Identidade ------------------------------------------------------
+
+    /**
+     * @notice Registra ou troca o proprio nome no painel.
+     * @dev    `msg.sender` e a chave: ninguem consegue nomear outra pessoa.
+     *         O registro e auto-declarado — nada impede alguem de se chamar
+     *         "Presidente" —, mas a garantia que existe e clara: o nome
+     *         exibido e sempre o que aquele endereco escolheu para si.
+     *
+     *         Nao ha owner nem moderacao aqui. A tesouraria nao pode alterar
+     *         nem apagar o nome de ninguem.
+     */
+    function setName(string calldata name) external {
+        uint256 len = bytes(name).length;
+        if (len == 0 || len > MAX_NAME_LENGTH) revert InvalidName(len, MAX_NAME_LENGTH);
+
+        _names[msg.sender] = name;
+        emit NameSet(msg.sender, name);
+    }
+
+    /// @notice Apaga o proprio nome. Volta a aparecer so o endereco.
+    function clearName() external {
+        delete _names[msg.sender];
+        emit NameCleared(msg.sender);
+    }
+
+    /// @notice Nome de um endereco. String vazia quando nao ha registro.
+    function nameOf(address account) external view returns (string memory) {
+        return _names[account];
+    }
+
+    /**
+     * @notice Nomes de varios enderecos de uma vez.
+     * @dev    O painel precisa dos nomes de todos os participantes do ranking;
+     *         uma chamada em lote evita N idas ao no para N pessoas.
+     */
+    function namesOf(address[] calldata accounts) external view returns (string[] memory names) {
+        names = new string[](accounts.length);
+
+        for (uint256 i = 0; i < accounts.length; i++) {
+            names[i] = _names[accounts[i]];
+        }
     }
 
     // --- Epocas ----------------------------------------------------------
