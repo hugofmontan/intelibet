@@ -160,7 +160,7 @@ fechar mais estão em [`docs/modelagem.md §7`](docs/modelagem.md).
 | Item | Valor |
 |---|---|
 | Rede | Sepolia (chainId 11155111) |
-| `InteliBet` | [`0x7cbf98af02e0951ffebf9213d973f4ca3882040f`](https://sepolia.etherscan.io/address/0x7cbf98af02e0951ffebf9213d973f4ca3882040f) |
+| `InteliBet` | [`0x6850539468d5ed5e955653f38a7ec0b400e12ac2`](https://sepolia.etherscan.io/address/0x6850539468d5ed5e955653f38a7ec0b400e12ac2) |
 | **Tx de transferência entre carteiras** | `0x` |
 | Tx `settleBet` | `0x` |
 | Tx `claimPrize` | `0x` |

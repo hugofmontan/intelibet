@@ -218,8 +218,8 @@ sacar o pote". As duas afirmações só são verificáveis com o código publica
 | Item | Valor |
 |---|---|
 | Rede | Sepolia (chainId 11155111) |
-| Contrato `InteliBet` | `0x7cbf98af02e0951ffebf9213d973f4ca3882040f` |
-| Bloco do deploy | 11529788 |
+| Contrato `InteliBet` | `0x6850539468d5ed5e955653f38a7ec0b400e12ac2` |
+| Bloco do deploy | 11530302 |
 | `epochDuration` usado | 600 (10 minutos) |
 | `minDistinctOpponents` usado | 1 |
 | Tx de deploy | `0xe3d03854ffdfdae60ba73d8661c3660ad79dae8e457aa961be297fcb005ad800` |
