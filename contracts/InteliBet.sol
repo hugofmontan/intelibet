@@ -43,6 +43,13 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  *            A taxa tambem NAO afeta o peg: o valor sai de uma conta e entra
  *            na do proprio contrato. O supply nao muda.
  *
+ *            A epoca tem dois modos, escolhidos no deploy:
+ *            - `epochDuration = 0` -> MES DE CALENDARIO. A epoca vira a
+ *              meia-noite UTC do dia 1. E o modo de producao.
+ *            - `epochDuration > 0` -> janela fixa em segundos. Existe para o
+ *              contrato ser demonstravel: com 600 da para mostrar apostas,
+ *              virada de epoca e premio dentro de um video.
+ *
  *         4. A IDENTIDADE, em duas camadas. A blockchain so conhece
  *            enderecos; o painel precisa de nomes.
  *
@@ -82,13 +89,19 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
     uint16 public constant FEE_BPS = 500;
 
     /**
-     * @notice Duracao de uma epoca, em segundos.
+     * @notice Duracao de uma epoca, em segundos. ZERO = mes de calendario.
      * @dev    Parametro de deploy porque producao e demonstracao querem coisas
-     *         diferentes: 30 dias (2592000) num uso real, algo como 600 (dez
-     *         minutos) num deploy de teste, para dar para mostrar o ciclo
-     *         inteiro — apostas, virada de epoca e premio — dentro de um video.
+     *         diferentes. Zero da o ciclo mensal real, alinhado ao dia 1. Um
+     *         valor em segundos da uma janela fixa, util para demonstrar o
+     *         ciclo inteiro dentro de um video.
      */
     uint64 public immutable epochDuration;
+
+    /// @notice True quando a epoca acompanha o mes de calendario.
+    bool public immutable calendarMonths;
+
+    /// @dev Indice de mes do deploy, marco zero no modo calendario.
+    uint256 private immutable _startMonthIndex;
 
     /**
      * @notice Quantos adversarios distintos e preciso vencer na epoca para
@@ -185,7 +198,6 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
     error AmountTooSmall(uint256 amount, uint256 minimum);
     error EpochNotFinished(uint256 epoch, uint256 current);
     error PrizeAlreadySettled(uint256 epoch);
-    error InvalidEpochDuration();
     error ZeroAddress();
     error ZeroAmount();
 
@@ -193,7 +205,7 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
 
     /**
      * @param treasury              Tesouraria: custodia a reserva, atesta e emite.
-     * @param epochDuration_        Segundos por epoca. 2592000 = 30 dias.
+     * @param epochDuration_        Segundos por epoca, ou 0 para mes de calendario.
      * @param minDistinctOpponents_ Adversarios distintos exigidos para concorrer.
      *
      * @dev Nenhum IBET e emitido no deploy. Como `reserveAttestedAt` comeca em
@@ -206,11 +218,12 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
         Ownable(treasury)
     {
         if (treasury == address(0)) revert ZeroAddress();
-        if (epochDuration_ == 0) revert InvalidEpochDuration();
 
         epochDuration = epochDuration_;
+        calendarMonths = epochDuration_ == 0;
         minDistinctOpponents = minDistinctOpponents_;
         startTime = uint64(block.timestamp);
+        _startMonthIndex = _monthIndexOf(block.timestamp);
     }
 
     function decimals() public pure override returns (uint8) {
@@ -345,14 +358,60 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
 
     // --- Epocas ----------------------------------------------------------
 
-    /// @notice Epoca corrente. Comeca em 0 no deploy.
+    /// @notice Epoca corrente. Comeca em 0 no deploy, nos dois modos.
     function currentEpoch() public view returns (uint256) {
+        if (calendarMonths) return _monthIndexOf(block.timestamp) - _startMonthIndex;
+
         return (block.timestamp - startTime) / epochDuration;
     }
 
-    /// @notice Momento em que a epoca informada termina.
+    /**
+     * @notice Momento em que a epoca informada termina.
+     * @dev    No modo calendario, e a meia-noite UTC do dia 1 do mes seguinte.
+     *         A epoca 0 quase nunca e um mes inteiro: vai do deploy ate a
+     *         virada. E proposital — alinhar ao calendario importa mais do que
+     *         a primeira epoca ter duracao cheia.
+     */
     function epochEndsAt(uint256 epoch) public view returns (uint256) {
+        if (calendarMonths) return _monthStart(_startMonthIndex + epoch + 1);
+
         return startTime + (epoch + 1) * epochDuration;
+    }
+
+    // --- Aritmetica de calendario ----------------------------------------
+    //
+    // Algoritmo days_from_civil / civil_from_days de Howard Hinnant, em
+    // aritmetica inteira e sem laco. Trabalha em UTC, calendario gregoriano
+    // proleptico, com 1970-01-01 como dia zero. Anos bissextos inclusos.
+
+    /// @dev Meses decorridos desde janeiro de 1970 ate o timestamp dado.
+    function _monthIndexOf(uint256 timestamp) private pure returns (uint256) {
+        uint256 z = timestamp / 86400 + 719_468;
+        uint256 era = z / 146_097;
+        uint256 doe = z - era * 146_097;
+        uint256 yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+        uint256 y = yoe + era * 400;
+        uint256 doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        uint256 mp = (5 * doy + 2) / 153;
+        uint256 m = mp < 10 ? mp + 3 : mp - 9;
+        if (m <= 2) y += 1;
+
+        return y * 12 + (m - 1);
+    }
+
+    /// @dev Timestamp da meia-noite UTC do dia 1 do mes de indice dado.
+    function _monthStart(uint256 monthIndex) private pure returns (uint256) {
+        uint256 y = monthIndex / 12;
+        uint256 m = (monthIndex % 12) + 1;
+        if (m <= 2) y -= 1;
+
+        uint256 era = y / 400;
+        uint256 yoe = y - era * 400;
+        uint256 mp = m > 2 ? m - 3 : m + 9;
+        uint256 doy = (153 * mp + 2) / 5;
+        uint256 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+
+        return (era * 146_097 + doe - 719_468) * 86400;
     }
 
     /// @notice Se o endereco ja cumpre o minimo de adversarios distintos.

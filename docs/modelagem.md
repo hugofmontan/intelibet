@@ -92,7 +92,7 @@ seção 3, em código.
 | **Resgate** | `redeem(amount, payoutRef)` — queima e registra o pedido de pagamento em reais | A queima vem antes do pagamento, então a colateralização nunca piora durante um resgate. |
 | **Pagamento de aposta** | `settleBet(winner, amount, description)` | Transfere, cobra a taxa e emite `BetSettled`. |
 | **Taxa** | **5%** (`FEE_BPS = 500`), **só sobre aposta paga** | Ver seção 5. |
-| **Época** | `epochDuration`, definido no deploy | 30 dias em produção; alguns minutos num deploy de demonstração. |
+| **Época** | `epochDuration`, definido no deploy | `0` = mês de calendário, virando à meia-noite UTC do dia 1º — é o que "maior ganhador do mês" exige. Um valor em segundos dá janela fixa, para demonstrar o ciclo num vídeo. |
 | **Elegibilidade ao prêmio** | `minDistinctOpponents`, definido no deploy | Mitigação de auto-aposta. Ver seção 7. |
 | **Aposta mínima** | 20 unidades base (R$ 0,20) | Abaixo disso a taxa truncaria para zero e a aposta entraria no ranking sem alimentar o pote. |
 

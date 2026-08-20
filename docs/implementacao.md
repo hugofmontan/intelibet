@@ -161,19 +161,58 @@ function currentEpoch() public view returns (uint256) {
 }
 ```
 
-`startTime` é o momento do deploy; `epochDuration` é **parâmetro do
-construtor**, não constante. Produção e demonstração querem coisas diferentes:
+O contrato tem **dois modos de época**, escolhidos no deploy:
 
-| Uso | `epochDuration` | Por quê |
+| `epochDuration_` | Modo | Uso |
 |---|---|---|
-| Produção | `2592000` (30 dias) | ciclo mensal |
-| Demonstração / vídeo | `600` (10 min) | dá para mostrar apostas, virada de época e prêmio numa gravação |
+| `0` | **mês de calendário** — vira à meia-noite UTC do dia 1º | produção |
+| `600` | janela fixa de 10 minutos | demonstração em vídeo |
 
-Sem esse parâmetro, o vídeo teria que descrever o prêmio em vez de mostrá-lo
-acontecendo. `minDistinctOpponents` é parâmetro pelo mesmo motivo: 3 em
-produção, 1 numa demonstração com duas contas.
+O modo calendário é o que a ideia pede: "o maior ganhador **do mês**" só faz
+sentido alinhado ao mês real, não a uma janela de 30 dias contada do deploy.
+Mas 30 dias de espera tornariam o prêmio impossível de demonstrar — daí o
+segundo modo existir. **A mesma base de código serve aos dois**, e a escolha é
+um argumento do construtor.
 
-Ambos são `immutable` — regra de prêmio que muda no meio do jogo não é regra.
+### A aritmética de calendário
+
+`block.timestamp` é um contador de segundos; não existe "mês" na EVM. Converter
+timestamp em ano/mês exige lidar com meses de tamanhos diferentes, anos
+bissextos e a regra dos séculos (2000 é bissexto, 2100 não é).
+
+O contrato usa o algoritmo **days_from_civil / civil_from_days de Howard
+Hinnant** — aritmética inteira, sem laço, sem tabela de meses:
+
+```solidity
+function _monthIndexOf(uint256 timestamp) private pure returns (uint256) {
+    uint256 z = timestamp / 86400 + 719_468;
+    uint256 era = z / 146_097;              // ciclo de 400 anos
+    uint256 doe = z - era * 146_097;
+    uint256 yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    ...
+    return y * 12 + (m - 1);
+}
+```
+
+A ideia central: o calendário gregoriano se repete a cada **400 anos**, que têm
+exatamente 146.097 dias. Reduzindo a data a "qual ciclo de 400 anos" e "qual dia
+dentro do ciclo", as irregularidades de bissexto viram divisões inteiras.
+
+`currentEpoch()` devolve `mêsAtual − mêsDoDeploy`, então a época 0 continua
+sendo a do deploy nos dois modos. `epochEndsAt` devolve o primeiro segundo do
+mês seguinte.
+
+> **A época 0 quase nunca é um mês inteiro** — vai do deploy até a virada. É
+> proposital: alinhar ao calendário importa mais do que a primeira época ter
+> duração cheia.
+
+**Verificação.** As duas funções foram portadas para Python e comparadas com
+`datetime` dia a dia de 2024 a 2031, mais os casos de borda (29/02/2024,
+31/12 23:59:59, 2000 e 2100). Zero divergências.
+
+`minDistinctOpponents` também é parâmetro de deploy: 3 em produção, 1 numa
+demonstração com duas contas. Todos são `immutable` — regra de prêmio que muda
+no meio do jogo não é regra.
 
 ## 7. `claimPrize`
 

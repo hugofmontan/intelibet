@@ -56,7 +56,7 @@ precisa ser estável. Não é utility (não libera produto nem serviço — o to
 | Emissão | `mint` da tesouraria, rejeitado se romper a invariante |
 | Pagamento de aposta | `settleBet` — 95% ao vencedor, 5% ao pote, emite `BetSettled` e pode nomear o vencedor |
 | Taxa | 5%, **só sobre aposta paga** — `transfer` comum não paga nada |
-| Época | `epochDuration` definido no deploy — 30 dias em produção |
+| Época | `epochDuration = 0` → mês de calendário (produção); em segundos → janela fixa (demonstração) |
 | Prêmio | `claimPrize` — o pote da época vai para quem mais ganhou |
 
 ---

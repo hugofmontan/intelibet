@@ -59,10 +59,11 @@ O construtor pede **três** argumentos. Clique na setinha ao lado do botão
 | Campo | Valor para a demonstração | Valor em produção |
 |---|---|---|
 | `treasury` | endereço da **Conta A** | carteira da tesouraria |
-| `epochDuration_` | **`600`** (10 minutos) | `2592000` (30 dias) |
+| `epochDuration_` | **`600`** (10 minutos) | **`0`** (mês de calendário) |
 | `minDistinctOpponents_` | **`1`** | `3` |
 
-> **Por que 600 e não 2592000.** A época precisa **virar durante a gravação**
+> **Por que 600 e não 0.** Com `0` a época acompanha o mês de calendário e só
+> vira à meia-noite do dia 1º — o modo de produção. Para o vídeo, a época precisa **virar durante a gravação**
 > para você conseguir mostrar o `claimPrize` funcionando. Com 30 dias, o vídeo
 > descreveria o prêmio em vez de demonstrá-lo. Os dois parâmetros existem
 > justamente para permitir isso, e explicar essa escolha no vídeo conta a seu
