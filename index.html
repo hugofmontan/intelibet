@@ -80,6 +80,44 @@
   .pill:hover { border-color: var(--accent); color: var(--accent); }
   .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--pos); }
 
+  /* ---------- a mesa ---------- */
+  .mesa { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin: 1.5rem 0; }
+  .pessoa {
+    position: relative; overflow: hidden;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    padding: 1.4rem 1.2rem 1.2rem; text-align: center;
+    transition: transform .18s ease, border-color .18s ease;
+  }
+  .pessoa:hover { transform: translateY(-3px); border-color: var(--accent); }
+  .pessoa.juiz { border-style: dashed; }
+  .pessoa .foto {
+    width: 104px; height: 104px; border-radius: 50%; object-fit: cover;
+    border: 3px solid var(--line); background: var(--sunken); margin-bottom: .8rem;
+  }
+  .pessoa.lider .foto { border-color: var(--warn); }
+  .pessoa .nome { font-size: 1.15rem; font-weight: 650; letter-spacing: -.01em; }
+  .pessoa .papel {
+    display: inline-block; margin: .25rem 0 .5rem;
+    font-size: .66rem; letter-spacing: .11em; text-transform: uppercase;
+    padding: .16rem .6rem; border-radius: 100px; border: 1px solid currentColor;
+  }
+  .pessoa .papel.a { color: var(--info); }
+  .pessoa .papel.b { color: var(--accent); }
+  .pessoa .papel.j { color: var(--muted); }
+  .pessoa .piada { color: var(--muted); font-size: .87rem; line-height: 1.45; min-height: 3.6em; }
+  .pessoa .linha {
+    margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--line);
+    font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .pessoa .carimbo {
+    position: absolute; top: .9rem; right: -2.4rem;
+    transform: rotate(34deg); width: 9rem; text-align: center;
+    font-size: .62rem; letter-spacing: .12em; font-weight: 700;
+    padding: .2rem 0; color: #fff; background: var(--neg);
+  }
+  .pessoa .carimbo.receber { background: var(--pos); }
+  .coroa { font-size: .95rem; }
+
   /* ---------- cartões ---------- */
   .card {
     background: var(--surface); border: 1px solid var(--line);
@@ -213,6 +251,12 @@
       <a class="pill" href="https://github.com/hugofmontan/intelibet" target="_blank" rel="noopener">Código no GitHub ↗</a>
     </div>
   </header>
+
+  <h2 style="margin-top:2.5rem">Quem senta à mesa</h2>
+  <p class="muted" style="margin-top:0">
+    Três endereços, gravados no contrato no dia do deploy e imutáveis desde então.
+  </p>
+  <div class="mesa" id="mesa"></div>
 
   <!-- ================= ESTADO AO VIVO ================= -->
 
@@ -501,13 +545,31 @@
 //  CONFIGURAÇÃO — preencher depois do deploy
 // ─────────────────────────────────────────────────────────────────────
 
-const CONTRATO = "0x0000000000000000000000000000000000000000"; // InteliBet (ficha)
+const CONTRATO = "0x57DeD57F8ebA2db718c6426D36E7Ff37Bf675d1f"; // InteliBet (ficha)
 const RPC      = "https://ethereum-sepolia-rpc.publicnode.com";
 const EXPLORER = "https://sepolia.etherscan.io";
 
 // Reserva: usado só para quem ainda não registrou o nome on-chain.
 const APELIDOS = {
-  // "0x...": "Hugo",
+  "0xf6e3a81cf77979eeac3874fc8245573c92e8eaf0": "Hugo",
+  "0xf4a3d4add2c15df016e66138ad96f30302b0134d": "Leon",
+  "0x6d240b001307b577500195846af94dbaf0061fe4": "Rodrigo",
+};
+
+// Foto e apresentação de cada um. A piada é por conta da casa.
+const PERFIS = {
+  "0xf6e3a81cf77979eeac3874fc8245573c92e8eaf0": {
+    foto: "assets/hugo.jpeg",
+    piada: "Também é a tesouraria, o que significa que ele imprime as próprias fichas. Garante que não há conflito de interesse.",
+  },
+  "0xf4a3d4add2c15df016e66138ad96f30302b0134d": {
+    foto: "assets/leon.jpeg",
+    piada: "Aceita. Sempre aceita. Nunca leu os termos até o fim, e isso nunca o impediu.",
+  },
+  "0x6d240b001307b577500195846af94dbaf0061fe4": {
+    foto: "assets/rodrigo.jpeg",
+    piada: "A palavra final. Não cabe recurso, não cabe conversa, não cabe choro. Já nasceu de terno.",
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -569,6 +631,38 @@ function pintarPosicao(s, limiar) {
       ? `Passou do limiar de R$ ${brl(limiar)} — hora de acertar por fora e confirmar o pagamento.`
       : `Limiar de acerto: R$ ${brl(limiar)}. Abaixo disso as apostas seguem se compensando.`}</div>
   </div>`;
+}
+
+function pintarMesa(s, bets) {
+  const pelosJuiz = bets.filter(({ b }) => Number(b.status) === 2 && !b.byAgreement).length;
+  const lider = s.wonA === s.wonB ? null : (s.wonA > s.wonB ? s.a : s.b);
+
+  const cartao = (addr, papel, classe, linha) => {
+    const perfil = PERFIS[addr.toLowerCase()] || {};
+    const ehLider = lider && lider.toLowerCase() === addr.toLowerCase();
+    const devedor = s.owed > 0n && s.creditor.toLowerCase() !== addr.toLowerCase() && papel !== "Juiz";
+    const credor = s.owed > 0n && s.creditor.toLowerCase() === addr.toLowerCase();
+
+    const carimbo = devedor ? `<div class="carimbo">DEVENDO</div>`
+                  : credor  ? `<div class="carimbo receber">A RECEBER</div>` : "";
+    const foto = perfil.foto
+      ? `<img class="foto" src="${perfil.foto}" alt="${esc(nome(addr))}" loading="lazy">`
+      : `<div class="foto"></div>`;
+
+    return `<div class="pessoa ${papel === "Juiz" ? "juiz" : ""} ${ehLider ? "lider" : ""}">
+      ${carimbo}
+      ${foto}
+      <div class="nome">${esc(nome(addr))} ${ehLider ? '<span class="coroa" title="lidera o mês">👑</span>' : ""}</div>
+      <div class="papel ${classe}">${papel}</div>
+      <div class="piada">${esc(perfil.piada || "")}</div>
+      <div class="linha">${linha}</div>
+    </div>`;
+  };
+
+  $("mesa").innerHTML =
+    cartao(s.a, "Jogador A", "a", `${brl(s.chipsA)} fichas · ganhou R$ ${brl(s.wonA)} no mês`) +
+    cartao(s.b, "Jogador B", "b", `${brl(s.chipsB)} fichas · ganhou R$ ${brl(s.wonB)} no mês`) +
+    cartao(s.judge, "Juiz", "j", `${pelosJuiz} aposta${pelosJuiz === 1 ? "" : "s"} decidida${pelosJuiz === 1 ? "" : "s"} · nunca aposta`);
 }
 
 function pintarStats(s) {
@@ -664,6 +758,7 @@ async function carregar() {
       Array.from({ length: s.totalBets }, (_, i) => c.getBet(i).then((b) => ({ id: i, b })))
     );
     pintarApostas(bets, s);
+    pintarMesa(s, bets);
 
     $("status").textContent = `atualizado ${new Date().toLocaleString("pt-BR")} · juiz: ${nome(j)}`;
   } catch (erro) {
