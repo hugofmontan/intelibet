@@ -1,12 +1,679 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <title>INTELIBET</title>
-  <meta http-equiv="refresh" content="0; url=./ranking/">
-  <link rel="canonical" href="./ranking/">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INTELIBET — a mesa de apostas do Inteli</title>
+<meta name="description" content="Dois tokens, uma mesa: ficha para apostar, credito para pagar. Contrato ERC-20 na rede Sepolia.">
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+
+<style>
+  :root {
+    --bg:      #fbfaf8;
+    --surface: #ffffff;
+    --sunken:  #f4f2ee;
+    --ink:     #1a1a18;
+    --muted:   #6d6a63;
+    --line:    #e5e2db;
+    --accent:  #b4581f;
+    --pos:     #1f7a4d;
+    --neg:     #a5342f;
+    --warn:    #96690d;
+    --info:    #2a5f9e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:      #141416;
+      --surface: #1c1c1f;
+      --sunken:  #232327;
+      --ink:     #ecebe8;
+      --muted:   #9b978e;
+      --line:    #2f2f34;
+      --accent:  #e0904f;
+      --pos:     #4fbe86;
+      --neg:     #e57a72;
+      --warn:    #d6a53c;
+      --info:    #7aa9dd;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 940px; margin: 0 auto; padding: 0 1.25rem 5rem; }
+
+  h1, h2, h3 { line-height: 1.25; letter-spacing: -.02em; }
+  h2 { font-size: 1.5rem; margin: 3.5rem 0 .5rem; }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .4rem; }
+  p  { margin: .7rem 0; }
+  a  { color: var(--accent); }
+  code, .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: .875em;
+  }
+  .lead { font-size: 1.1rem; color: var(--muted); }
+  .muted { color: var(--muted); }
+  .rule { border: 0; border-top: 1px solid var(--line); margin: 3.5rem 0 0; }
+
+  /* ---------- cabeçalho ---------- */
+  header.hero { padding: 4rem 0 1rem; }
+  .brand {
+    display: inline-flex; align-items: baseline; gap: .55rem;
+    font-size: 2.6rem; font-weight: 700; letter-spacing: -.04em; margin: 0;
+  }
+  .brand span { color: var(--accent); }
+  .tagline { font-size: 1.15rem; color: var(--muted); margin: .5rem 0 1.5rem; max-width: 38rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .pill {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .78rem; padding: .28rem .7rem; border-radius: 100px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    text-decoration: none;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--accent); }
+  .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--pos); }
+
+  /* ---------- cartões ---------- */
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; overflow: hidden;
+  }
+  .card > h3 {
+    margin: 0; padding: .85rem 1.15rem; font-size: .74rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+  .pad { padding: 1.15rem; }
+  .grid { display: grid; gap: 1rem; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+
+  /* ---------- posição líquida ---------- */
+  .debt {
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 14px; padding: 1.5rem 1.6rem; margin: 1.25rem 0;
+  }
+  .debt.due { border-left-color: var(--neg); }
+  .debt.zero { border-left-color: var(--pos); }
+  .debt .who { font-size: 1.6rem; font-weight: 650; letter-spacing: -.02em; }
+  .debt .val { font-variant-numeric: tabular-nums; }
+  .debt .sub { color: var(--muted); font-size: .9rem; margin-top: .3rem; }
+
+  .stat b { display: block; font-size: 1.45rem; font-variant-numeric: tabular-nums; }
+  .stat span {
+    color: var(--muted); font-size: .72rem;
+    text-transform: uppercase; letter-spacing: .07em;
+  }
+
+  /* ---------- apostas ---------- */
+  .bet {
+    display: grid; gap: .3rem;
+    padding: 1rem 1.15rem; border-bottom: 1px solid var(--line);
+  }
+  .bet:last-child { border-bottom: 0; }
+  .bet .top { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+  .bet .terms { font-weight: 600; flex: 1 1 14rem; }
+  .bet .meta { color: var(--muted); font-size: .85rem; }
+  .badge {
+    font-size: .7rem; padding: .16rem .55rem; border-radius: 100px;
+    border: 1px solid currentColor; white-space: nowrap;
+  }
+  .b-open { color: var(--warn); }
+  .b-active { color: var(--info); }
+  .b-resolved { color: var(--pos); }
+  .b-dead { color: var(--muted); }
+  .stake { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+
+  /* ---------- tabelas ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: .93rem; }
+  th, td { padding: .65rem 1.15rem; text-align: left; border-bottom: 1px solid var(--line); }
+  tbody tr:last-child td { border-bottom: 0; }
+  th {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); font-weight: 600;
+  }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .scroll { overflow-x: auto; }
+
+  /* ---------- explicação ---------- */
+  .token-card { padding: 1.3rem; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); }
+  .token-card h4 { margin: 0 0 .1rem; font-size: 1.05rem; }
+  .token-card .sym { font-size: .78rem; color: var(--muted); letter-spacing: .04em; }
+  .token-card ul { margin: .8rem 0 0; padding-left: 1.1rem; }
+  .token-card li { margin: .3rem 0; font-size: .93rem; }
+  .token-card.ficha { border-top: 3px solid var(--info); }
+  .token-card.credito { border-top: 3px solid var(--accent); }
+
+  figure { margin: 1.5rem 0; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { color: var(--muted); font-size: .85rem; margin-top: .6rem; }
+
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 1.2rem 0; }
+  .steps li {
+    counter-increment: s; position: relative;
+    padding: .55rem 0 .55rem 2.6rem; border-bottom: 1px solid var(--line);
+  }
+  .steps li:last-child { border-bottom: 0; }
+  .steps li::before {
+    content: counter(s); position: absolute; left: 0; top: .5rem;
+    width: 1.7rem; height: 1.7rem; border-radius: 50%;
+    background: var(--sunken); color: var(--muted);
+    font-size: .78rem; font-weight: 600;
+    display: grid; place-items: center;
+  }
+  .steps b { font-weight: 650; }
+
+  .note {
+    border-left: 3px solid var(--accent); background: var(--sunken);
+    padding: .9rem 1.1rem; border-radius: 0 10px 10px 0; margin: 1.3rem 0;
+    font-size: .95rem;
+  }
+
+  .netting { display: grid; gap: .5rem; margin: 1.2rem 0; }
+  .netrow { display: grid; grid-template-columns: 8.5rem 1fr; gap: .8rem; align-items: center; font-size: .9rem; }
+  .bar { height: 1.6rem; border-radius: 6px; display: flex; align-items: center; padding: 0 .55rem; color: #fff; font-size: .8rem; font-variant-numeric: tabular-nums; }
+  .bar.h { background: var(--info); }
+  .bar.l { background: var(--accent); }
+  .bar.n { background: var(--pos); }
+
+  footer { margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .87rem; }
+  footer a { color: var(--muted); }
+  footer .addr { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; word-break: break-all; }
+
+  button {
+    font: inherit; font-size: .85rem; padding: .35rem .85rem; cursor: pointer;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  .msg { padding: 2rem 1.15rem; text-align: center; color: var(--muted); }
+</style>
 </head>
 <body>
-  <p>Redirecionando para o <a href="./ranking/">ranking do INTELIBET</a>…</p>
+<main>
+
+  <header class="hero">
+    <h1 class="brand">INTELI<span>BET</span></h1>
+    <p class="tagline">
+      A mesa de apostas de dois amigos, com um juiz e duas moedas: uma ficha
+      para apostar e um crédito que diz quanto precisa ser pago de verdade.
+    </p>
+    <div class="chips">
+      <span class="pill"><span class="dot"></span> Sepolia testnet</span>
+      <a class="pill" id="lnkChip" href="#" target="_blank" rel="noopener">Contrato da ficha ↗</a>
+      <a class="pill" id="lnkCredit" href="#" target="_blank" rel="noopener">Contrato do crédito ↗</a>
+      <a class="pill" href="https://github.com/hugofmontan/intelibet" target="_blank" rel="noopener">Código no GitHub ↗</a>
+    </div>
+  </header>
+
+  <!-- ================= ESTADO AO VIVO ================= -->
+
+  <h2>Como está a mesa agora</h2>
+  <p class="muted" style="margin-top:0">Lido direto da blockchain. Nada nesta página é digitado à mão.</p>
+
+  <div id="posicao"><div class="msg">Carregando…</div></div>
+
+  <div class="grid g3" id="stats"></div>
+
+  <div class="card" style="margin-top:1.5rem">
+    <h3>Apostas</h3>
+    <div id="apostas"><div class="msg">—</div></div>
+  </div>
+
+  <div class="card" style="margin-top:1.25rem">
+    <h3>Placar do mês</h3>
+    <div class="scroll"><div id="placar"><div class="msg">—</div></div></div>
+  </div>
+
+  <p style="margin-top:1rem"><button id="reload">Atualizar</button> <span class="muted" id="status"></span></p>
+
+  <hr class="rule">
+
+  <!-- ================= COMO FUNCIONA ================= -->
+
+  <h2>Por que dois tokens</h2>
+
+  <p>
+    Uma aposta entre amigos tem duas coisas dentro dela que não são a mesma coisa:
+    a <b>brincadeira</b> — apostar, acompanhar, ganhar — e a <b>dívida</b>, que é
+    dinheiro de verdade mudando de mão. Juntar as duas num token só obriga a
+    escolher: ou ele é fictício e a dívida não significa nada, ou ele vale
+    dinheiro e cada aposta boba vira uma transação financeira.
+  </p>
+  <p>
+    O INTELIBET separa. São dois contratos ERC-20, publicados juntos, com
+    propriedades deliberadamente opostas.
+  </p>
+
+  <div class="grid g2" style="margin-top:1.5rem">
+    <div class="token-card ficha">
+      <h4>Ficha</h4>
+      <div class="sym mono">IBET · transferível</div>
+      <ul>
+        <li>Moeda fictícia da mesa, sem lastro e sem promessa de valor</li>
+        <li>A tesouraria emite à vontade para os dois jogadores</li>
+        <li>É o que entra em custódia quando a aposta é criada</li>
+        <li>Circula livremente — é um ERC-20 comum</li>
+      </ul>
+    </div>
+    <div class="token-card credito">
+      <h4>Crédito</h4>
+      <div class="sym mono">IBRL · NÃO transferível</div>
+      <ul>
+        <li>1 IBRL = R$ 1,00 a receber, na vida real</li>
+        <li>Nasce <b>só</b> de aposta resolvida, no valor exato apostado</li>
+        <li>Morre <b>só</b> por confirmação de quem tinha a receber</li>
+        <li>Não circula: é registro de obrigação, não dinheiro</li>
+      </ul>
+    </div>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 700 210" role="img" aria-label="Uma aposta resolvida gera fichas para o vencedor e crédito de dívida">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55" marker-end="url(#ar)">
+        <path d="M170,105 L235,105"/>
+        <path d="M395,80 L460,55"/>
+        <path d="M395,130 L460,155"/>
+        <path d="M600,155 L600,182"/>
+      </g>
+      <g font-family="ui-sans-serif, system-ui" font-size="13" fill="currentColor">
+        <rect x="12" y="78" width="158" height="54" rx="10" fill="none" stroke="currentColor" opacity=".4"/>
+        <text x="91" y="100" text-anchor="middle" font-weight="600">Aposta criada</text>
+        <text x="91" y="119" text-anchor="middle" opacity=".6" font-size="11">as duas entradas travadas</text>
+
+        <rect x="237" y="78" width="158" height="54" rx="10" fill="none" stroke="currentColor" opacity=".4"/>
+        <text x="316" y="100" text-anchor="middle" font-weight="600">Resolvida</text>
+        <text x="316" y="119" text-anchor="middle" opacity=".6" font-size="11">juiz ou acordo mútuo</text>
+
+        <rect x="462" y="28" width="228" height="54" rx="10" fill="none" stroke="currentColor" opacity=".4"/>
+        <text x="476" y="50" font-weight="600">Fichas → vencedor</text>
+        <text x="476" y="69" opacity=".6" font-size="11">camada da brincadeira</text>
+
+        <rect x="462" y="128" width="228" height="54" rx="10" fill="none" stroke="currentColor" opacity=".4"/>
+        <text x="476" y="150" font-weight="600">Crédito compensado</text>
+        <text x="476" y="169" opacity=".6" font-size="11">camada do dinheiro real</text>
+
+        <text x="600" y="200" text-anchor="middle" opacity=".6" font-size="11">acerto por Pix, fora da rede</text>
+      </g>
+    </svg>
+    <figcaption>
+      Cada aposta resolvida move as duas camadas de uma vez: as fichas vão para
+      quem ganhou, e a dívida real é recalculada.
+    </figcaption>
+  </figure>
+
+  <h2>A compensação</h2>
+
+  <p>
+    Se cada vitória apenas emitisse crédito, os dois acumulariam saldo e ninguém
+    saberia quem deve a quem. A regra é <b>abater antes de emitir</b>: uma
+    vitória primeiro anula a dívida contrária, e só o que sobra vira dívida nova.
+  </p>
+
+  <div class="netting">
+    <div class="netrow">
+      <span class="muted">Antes</span>
+      <div><span class="bar l" style="width:38%">Leon tem R$ 30 a receber</span></div>
+    </div>
+    <div class="netrow">
+      <span class="muted">Hugo ganha R$ 50</span>
+      <div><span class="bar h" style="width:60%">queima 30 do Leon · emite 20 para o Hugo</span></div>
+    </div>
+    <div class="netrow">
+      <span class="muted">Depois</span>
+      <div><span class="bar n" style="width:26%">Hugo tem R$ 20 a receber</span></div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>A invariante que isso garante:</b> no máximo <b>um</b> dos dois tem saldo
+    de crédito em qualquer momento. O saldo <i>é</i> a resposta para "quem deve
+    quanto a quem" — ninguém precisa calcular nada, e não existe versão
+    divergente da conta.
+  </div>
+
+  <p>
+    Perder uma aposta, então, nem sempre cria dívida: na maior parte das vezes
+    apenas abate a que já existia. As apostas vão se compensando sozinhas, e
+    dinheiro real só precisa mudar de mão quando o saldo líquido cresce o
+    bastante — o limiar de acerto, definido no deploy.
+  </p>
+
+  <h2>O ciclo de uma aposta</h2>
+
+  <figure>
+    <svg viewBox="0 0 700 250" role="img" aria-label="Máquina de estados da aposta">
+      <g fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55" marker-end="url(#ar)">
+        <path d="M138,50 L212,50"/>
+        <path d="M348,50 L422,50"/>
+        <path d="M75,74 L75,140"/>
+        <path d="M280,74 L280,140"/>
+        <path d="M488,74 L488,140"/>
+      </g>
+      <g font-family="ui-sans-serif, system-ui" font-size="13" fill="currentColor">
+        <rect x="12" y="28" width="126" height="46" rx="10" fill="none" stroke="currentColor" opacity=".45"/>
+        <text x="75" y="56" text-anchor="middle" font-weight="600">Aberta</text>
+
+        <rect x="214" y="28" width="134" height="46" rx="10" fill="none" stroke="currentColor" opacity=".45"/>
+        <text x="281" y="56" text-anchor="middle" font-weight="600">Em andamento</text>
+
+        <rect x="424" y="28" width="126" height="46" rx="10" fill="none" stroke="currentColor" opacity=".45"/>
+        <text x="487" y="56" text-anchor="middle" font-weight="600">Resolvida</text>
+
+        <text x="175" y="43" text-anchor="middle" font-size="11" opacity=".65">aceita</text>
+        <text x="385" y="43" text-anchor="middle" font-size="11" opacity=".65">juiz / acordo</text>
+
+        <text x="75"  y="160" text-anchor="middle" font-size="11" opacity=".65">cancela</text>
+        <text x="280" y="160" text-anchor="middle" font-size="11" opacity=".65">prazo vence</text>
+        <text x="488" y="160" text-anchor="middle" font-size="11" opacity=".65">paga por fora</text>
+
+        <rect x="12" y="170" width="126" height="46" rx="10" fill="none" stroke="currentColor" opacity=".3" stroke-dasharray="4 3"/>
+        <text x="75" y="198" text-anchor="middle" opacity=".75">Cancelada</text>
+
+        <rect x="214" y="170" width="134" height="46" rx="10" fill="none" stroke="currentColor" opacity=".3" stroke-dasharray="4 3"/>
+        <text x="281" y="198" text-anchor="middle" opacity=".75">Devolvida</text>
+
+        <rect x="424" y="170" width="126" height="46" rx="10" fill="none" stroke="currentColor" opacity=".3" stroke-dasharray="4 3"/>
+        <text x="487" y="198" text-anchor="middle" opacity=".75">Quitada</text>
+
+        <text x="600" y="120" font-size="11" opacity=".6">Todo estado final</text>
+        <text x="600" y="136" font-size="11" opacity=".6">devolve ficha para</text>
+        <text x="600" y="152" font-size="11" opacity=".6">alguém.</text>
+      </g>
+    </svg>
+  </figure>
+
+  <ol class="steps">
+    <li><b>Um dos dois propõe.</b> <code>createBet(valor, termos, prazo)</code> — a entrada dele sai da carteira e fica no contrato. O oponente não é parâmetro: só existem dois jogadores, então o contrato sabe quem é o outro.</li>
+    <li><b>O outro aceita.</b> <code>acceptBet(id)</code> deposita entrada igual. Enquanto não aceitar, a aposta não existe — o que resolve sozinho o "eu nunca topei isso".</li>
+    <li><b>O resultado sai.</b> Se os dois concordam, <code>agreeOn(id, vencedor)</code> liquida na hora. Se discordam, <code>resolveBet(id, vencedor)</code> pelo juiz. Ele decide <b>quem</b>, nunca <b>quanto</b>.</li>
+    <li><b>A dívida se acerta na vida real.</b> Quando o saldo cruza o limiar, o contrato emite um aviso. Quem recebeu o Pix chama <code>confirmPayment(valor)</code> e o crédito é queimado.</li>
+  </ol>
+
+  <h3>As saídas de emergência</h3>
+  <p>
+    Custódia sem saída é dinheiro preso. Se ninguém aceitar, o proponente cancela
+    e recupera a entrada. E se o prazo vencer sem decisão — juiz sumido, por
+    exemplo — <b>qualquer pessoa</b> pode chamar <code>refundExpired(id)</code>,
+    que devolve as duas entradas. Se isso dependesse do juiz, a inércia dele
+    prenderia o dinheiro dos dois para sempre.
+  </p>
+
+  <h2>Decisões que valem explicar</h2>
+
+  <div class="grid g2" style="margin-top:1.2rem">
+    <div class="token-card">
+      <h4>O crédito não é transferível</h4>
+      <p class="muted" style="margin:.5rem 0 0; font-size:.93rem">
+        Dívida entre duas pessoas específicas não circula. Bloquear a
+        transferência é o que separa "registro de obrigação" de "dinheiro". As
+        funções ERC-20 continuam com a assinatura padrão — o padrão define
+        interface, não obriga que toda transferência seja aceita.
+      </p>
+    </div>
+    <div class="token-card">
+      <h4>Só o credor confirma o pagamento</h4>
+      <p class="muted" style="margin:.5rem 0 0; font-size:.93rem">
+        O devedor não tem função nenhuma que reduza a própria dívida. Se tivesse,
+        o registro não valeria nada. Quem recebeu é o único que sabe se o
+        dinheiro chegou.
+      </p>
+    </div>
+    <div class="token-card">
+      <h4>O juiz é desempate, não pedágio</h4>
+      <p class="muted" style="margin:.5rem 0 0; font-size:.93rem">
+        Na maioria das apostas o resultado é óbvio para os dois. O acordo mútuo
+        liquida sem passar por ninguém; o juiz existe para quando há divergência.
+        E ele nunca pode ser parte — isso é garantido no construtor, não por uma
+        verificação que alguém possa esquecer.
+      </p>
+    </div>
+    <div class="token-card">
+      <h4>Não existe auto-aposta</h4>
+      <p class="muted" style="margin:.5rem 0 0; font-size:.93rem">
+        Com dois jogadores fixos, custódia e um juiz que nunca é parte, não há
+        como fabricar vitória contra si mesmo. O contrato só aceita apostas entre
+        A e B, e quem decide é C.
+      </p>
+    </div>
+    <div class="token-card">
+      <h4>O mês é mês de verdade</h4>
+      <p class="muted" style="margin:.5rem 0 0; font-size:.93rem">
+        A época vira à meia-noite UTC do dia 1º, não "30 dias depois do deploy".
+        Como não existe calendário na EVM, o contrato converte timestamp em
+        ano/mês pelo algoritmo de Howard Hinnant — aritmética inteira, sem laço,
+        com bissextos e a regra dos séculos.
+      </p>
+    </div>
+    <div class="token-card">
+      <h4>Não existe banca</h4>
+      <p class="muted" style="margin:.5rem 0 0; font-size:.93rem">
+        O contrato não define cotação, não toma o outro lado de nenhuma aposta e
+        não retém percentual — em nenhuma das duas camadas. O vencedor recebe
+        exatamente as duas entradas.
+      </p>
+    </div>
+  </div>
+
+  <h2>Limites assumidos</h2>
+  <p>
+    O juiz é um ponto de confiança: se ele decidir errado, o contrato paga
+    assim mesmo. A mesa é de dois jogadores fixos — abrir para mais gente exige
+    outro desenho de compensação. E o acerto final acontece <b>fora da rede</b>:
+    o contrato registra a dívida e a extinção dela, mas não move dinheiro de
+    verdade. Isso é escolha, não limitação técnica: o que ele garante é que a
+    conta seja única, pública e não manipulável por quem deve.
+  </p>
+
+  <footer>
+    <p>
+      <b>INTELIBET</b> — Questão de Computação 1 · Semana 03 · Módulo AD07
+      (Tokenização de Ativos e Web3) · Inteli · Turma 2026-2B-T19<br>
+      Hugo de Freitas Montan · Professor Bryan Kano Ferreira
+    </p>
+    <p class="addr">
+      Ficha (IBET): <span id="addrChip">—</span><br>
+      Crédito (IBRL): <span id="addrCredit">—</span>
+    </p>
+    <p>
+      <a href="https://github.com/hugofmontan/intelibet">Repositório</a> ·
+      <a href="https://github.com/hugofmontan/intelibet/blob/main/docs/modelagem.md">Modelagem</a> ·
+      <a href="https://github.com/hugofmontan/intelibet/blob/main/docs/implementacao.md">Implementação</a>
+    </p>
+  </footer>
+</main>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────
+//  CONFIGURAÇÃO — preencher depois do deploy
+// ─────────────────────────────────────────────────────────────────────
+
+const CONTRATO = "0x0000000000000000000000000000000000000000"; // InteliBet (ficha)
+const RPC      = "https://ethereum-sepolia-rpc.publicnode.com";
+const EXPLORER = "https://sepolia.etherscan.io";
+
+// Reserva: usado só para quem ainda não registrou o nome on-chain.
+const APELIDOS = {
+  // "0x...": "Hugo",
+};
+
+// ─────────────────────────────────────────────────────────────────────
+
+const ABI = [
+  "function playerA() view returns (address)",
+  "function playerB() view returns (address)",
+  "function judge() view returns (address)",
+  "function credit() view returns (address)",
+  "function settlementThreshold() view returns (uint256)",
+  "function betCount() view returns (uint256)",
+  "function tableNames() view returns (string a, string b, string j)",
+  "function tableSummary() view returns (uint256 epoch, uint256 epochEnds, uint256 wonA, uint256 wonB, uint256 chipsA, uint256 chipsB, address creditor, uint256 owed, uint256 totalBets)",
+  "function getBet(uint256 id) view returns (tuple(address proposer, uint128 stake, uint64 deadline, uint8 status, address winner, uint64 resolvedEpoch, bool byAgreement, string terms))"
+];
+
+const DEC = 2;
+const VAZIO = "0x0000000000000000000000000000000000000000";
+const ROTULOS = ["Aberta", "Em andamento", "Resolvida", "Cancelada", "Devolvida"];
+const CLASSES = ["b-open", "b-active", "b-resolved", "b-dead", "b-dead"];
+
+const $ = (id) => document.getElementById(id);
+const brl = (v) => (Number(v) / 10 ** DEC).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const curto = (a) => a.slice(0, 6) + "…" + a.slice(-4);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let NOMES = {};
+const nome = (a) => {
+  if (!a || a === VAZIO) return "—";
+  const k = a.toLowerCase();
+  return NOMES[k] || APELIDOS[a] || APELIDOS[k] || curto(a);
+};
+
+function quando(ts) {
+  const falta = Number(ts) - Math.floor(Date.now() / 1000);
+  if (falta <= 0) return "encerrado";
+  const d = Math.floor(falta / 86400), h = Math.floor((falta % 86400) / 3600), m = Math.floor((falta % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}min`;
+  return `${m}min`;
+}
+
+function pintarPosicao(s, limiar) {
+  const alvo = $("posicao");
+  if (s.owed === 0n) {
+    alvo.innerHTML = `<div class="debt zero">
+      <div class="who">Ninguém deve nada</div>
+      <div class="sub">As apostas resolvidas se compensaram inteiras.</div>
+    </div>`;
+    return;
+  }
+  const cobrar = s.owed >= limiar;
+  const credor = nome(s.creditor);
+  const devedor = nome(s.creditor.toLowerCase() === s.a.toLowerCase() ? s.b : s.a);
+
+  alvo.innerHTML = `<div class="debt ${cobrar ? "due" : ""}">
+    <div class="who">${esc(devedor)} deve <span class="val">R$ ${brl(s.owed)}</span> a ${esc(credor)}</div>
+    <div class="sub">${cobrar
+      ? `Passou do limiar de R$ ${brl(limiar)} — hora de acertar por fora e confirmar o pagamento.`
+      : `Limiar de acerto: R$ ${brl(limiar)}. Abaixo disso as apostas seguem se compensando.`}</div>
+  </div>`;
+}
+
+function pintarStats(s) {
+  const cartao = (r, v) => `<div class="card pad stat"><b>${v}</b><span>${r}</span></div>`;
+  $("stats").innerHTML =
+    cartao("mês termina em", quando(s.epochEnds)) +
+    cartao("apostas registradas", s.totalBets) +
+    cartao("fichas em jogo", brl(s.chipsA + s.chipsB));
+}
+
+function pintarPlacar(s) {
+  const linha = (addr, won, chips) => `<tr>
+      <td><b>${esc(nome(addr))}</b> <span class="muted mono">${curto(addr)}</span></td>
+      <td class="num">R$ ${brl(won)}</td>
+      <td class="num muted">${brl(chips)}</td>
+    </tr>`;
+  const lider = s.wonA === s.wonB ? "" :
+    `<p class="muted" style="padding:.8rem 1.15rem;margin:0;font-size:.88rem;border-top:1px solid var(--line)">
+       Liderando o mês: <b>${esc(nome(s.wonA > s.wonB ? s.a : s.b))}</b></p>`;
+
+  $("placar").innerHTML = `<table>
+      <thead><tr><th>Jogador</th><th class="num">Ganhou no mês</th><th class="num">Fichas</th></tr></thead>
+      <tbody>${linha(s.a, s.wonA, s.chipsA)}${linha(s.b, s.wonB, s.chipsB)}</tbody>
+    </table>${lider}`;
+}
+
+const oponente = (quem, s) => (quem.toLowerCase() === s.a.toLowerCase() ? s.b : s.a);
+
+function pintarApostas(bets, s) {
+  if (!bets.length) { $("apostas").innerHTML = `<div class="msg">Nenhuma aposta registrada ainda.</div>`; return; }
+
+  $("apostas").innerHTML = [...bets].reverse().map(({ id, b }) => {
+    const st = Number(b.status);
+    const detalhe =
+      st === 0 ? `${esc(nome(b.proposer))} propôs · aguardando aceite · prazo em ${quando(b.deadline)}`
+      : st === 1 ? `${esc(nome(b.proposer))} × ${esc(nome(oponente(b.proposer, s)))} · em andamento · prazo em ${quando(b.deadline)}`
+      : st === 2 ? `Ganhou: <b>${esc(nome(b.winner))}</b> · ${b.byAgreement ? "por acordo entre os dois" : "decidido pelo juiz"}`
+      : st === 3 ? `Retirada pelo proponente` : `Prazo vencido — entradas devolvidas`;
+
+    return `<div class="bet">
+      <div class="top">
+        <span class="terms">${esc(b.terms)}</span>
+        <span class="stake">R$ ${brl(b.stake)}</span>
+        <span class="badge ${CLASSES[st]}">${ROTULOS[st]}</span>
+      </div>
+      <div class="meta">#${id} · ${detalhe}</div>
+    </div>`;
+  }).join("");
+}
+
+async function carregar() {
+  $("status").textContent = "consultando a Sepolia…";
+
+  if (/^0x0{40}$/i.test(CONTRATO)) {
+    $("posicao").innerHTML = `<div class="msg">Preencha <code>CONTRATO</code> no topo do &lt;script&gt; depois do deploy.</div>`;
+    $("status").textContent = "";
+    return;
+  }
+
+  try {
+    const provider = new ethers.JsonRpcProvider(RPC);
+    const c = new ethers.Contract(CONTRATO, ABI, provider);
+
+    const [a, b, j, creditAddr, limiar, resumo, nomes] = await Promise.all([
+      c.playerA(), c.playerB(), c.judge(), c.credit(),
+      c.settlementThreshold(), c.tableSummary(), c.tableNames(),
+    ]);
+
+    NOMES = {};
+    if (nomes.a) NOMES[a.toLowerCase()] = nomes.a;
+    if (nomes.b) NOMES[b.toLowerCase()] = nomes.b;
+    if (nomes.j) NOMES[j.toLowerCase()] = nomes.j;
+
+    const s = {
+      a, b, judge: j,
+      epoch: resumo.epoch, epochEnds: resumo.epochEnds,
+      wonA: resumo.wonA, wonB: resumo.wonB,
+      chipsA: resumo.chipsA, chipsB: resumo.chipsB,
+      creditor: resumo.creditor, owed: resumo.owed,
+      totalBets: Number(resumo.totalBets),
+    };
+
+    $("lnkChip").href = `${EXPLORER}/address/${CONTRATO}`;
+    $("lnkCredit").href = `${EXPLORER}/address/${creditAddr}`;
+    $("addrChip").textContent = CONTRATO;
+    $("addrCredit").textContent = creditAddr;
+
+    pintarPosicao(s, limiar);
+    pintarStats(s);
+    pintarPlacar(s);
+
+    const bets = await Promise.all(
+      Array.from({ length: s.totalBets }, (_, i) => c.getBet(i).then((b) => ({ id: i, b })))
+    );
+    pintarApostas(bets, s);
+
+    $("status").textContent = `atualizado ${new Date().toLocaleString("pt-BR")} · juiz: ${nome(j)}`;
+  } catch (erro) {
+    $("posicao").innerHTML = `<div class="msg">Não consegui ler a rede: ${esc(erro.message || erro)}</div>`;
+    $("status").textContent = "";
+  }
+}
+
+$("reload").addEventListener("click", carregar);
+carregar();
+</script>
 </body>
 </html>

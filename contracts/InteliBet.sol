@@ -2,358 +2,579 @@
 pragma solidity ^0.8.20;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
- * @title  INTELIBET — stablecoin de aposta entre pessoas do Inteli
- * @notice 1 IBET = R$ 1,00, lastreado em reserva sob custodia da tesouraria
- *         da comunidade. A aposta e feita hoje e paga depois, entao o valor
- *         apostado precisa significar a mesma coisa nos dois momentos.
+ * @title  InteliCredit (IBRL) — o registro de divida
+ * @notice 1 IBRL = R$ 1,00 a receber. NAO e dinheiro: e a anotacao de quanto
+ *         uma pessoa tem a receber da outra, em reais, na vida real.
  *
- * @dev    Quatro mecanismos, num contrato so:
+ * @dev    Duas regras definem este token, e as duas sao restricoes:
  *
- *         1. O PEG, por uma invariante que o contrato recusa violar:
+ *         1. NAO E TRANSFERIVEL. Divida entre duas pessoas especificas nao
+ *            circula. Bloquear a transferencia e o que separa "registro de
+ *            obrigacao" de "dinheiro". As funcoes ERC-20 continuam existindo
+ *            com a assinatura padrao — o padrao define interface, nao obriga
+ *            que toda transferencia seja aceita — entao carteiras e
+ *            exploradores continuam reconhecendo o token e mostrando saldo.
  *
- *                totalSupply() <= reservesAttested
+ *         2. SO O CONTROLLER EMITE E QUEIMA. O controller e o InteliBet, que
+ *            cria este contrato no proprio construtor. Nem os jogadores nem o
+ *            juiz nem o dono conseguem criar divida por fora.
  *
- *            `mint` e o unico caminho de emissao e checa isso sempre. A
- *            reserva e publicada on-chain com valor, hash do comprovante e
- *            timestamp, e vence em 30 dias.
- *
- *            Corolario: NAO existe teto fixo de supply. Num token de
- *            governanca o teto seria a garantia central; numa stablecoin
- *            seria defeito — o supply precisa subir quando entra dinheiro na
- *            reserva e cair no resgate. O teto e a reserva, e ela e publica.
- *
- *         2. O HISTORICO, por `settleBet`. Um `transfer` comum nao diz se
- *            aquilo foi aposta paga, rateio de lanche ou emprestimo devolvido.
- *            `settleBet` transfere e marca: quem pagou, quem recebeu, quanto,
- *            quanto de taxa e sobre o que.
- *
- *         3. O INCENTIVO, por epocas e premio. Cada aposta paga deixa 5% num
- *            pote da epoca corrente. No fim da epoca, quem mais ganhou em
- *            apostas leva o pote inteiro.
- *
- *            A taxa NAO incide sobre `transfer`: um ERC-20 que entrega menos
- *            do que foi mandado quebra carteira, exchange e qualquer contrato
- *            que faca conta antes de transferir. Aposta paga tem rake;
- *            mandar dinheiro para um amigo nao paga nada.
- *
- *            A taxa tambem NAO afeta o peg: o valor sai de uma conta e entra
- *            na do proprio contrato. O supply nao muda.
- *
- *            A epoca tem dois modos, escolhidos no deploy:
- *            - `epochDuration = 0` -> MES DE CALENDARIO. A epoca vira a
- *              meia-noite UTC do dia 1. E o modo de producao.
- *            - `epochDuration > 0` -> janela fixa em segundos. Existe para o
- *              contrato ser demonstravel: com 600 da para mostrar apostas,
- *              virada de epoca e premio dentro de um video.
- *
- *         4. A IDENTIDADE, em duas camadas. A blockchain so conhece
- *            enderecos; o painel precisa de nomes.
- *
- *            `setName` e AUTO-DECLARACAO: `msg.sender` e a chave, entao so
- *            voce nomeia a si mesmo, e esse nome tem precedencia sobre
- *            qualquer outro.
- *
- *            `settleBet` aceita um nome para o vencedor, usado apenas quando
- *            ele ainda NAO TEM NOME NENHUM. Serve para quem recebe uma aposta
- *            sem nunca ter interagido com o contrato aparecer no painel com
- *            nome em vez de endereco. Nao sobrescreve nada: nome atribuido
- *            por terceiro cede assim que a pessoa se declara.
- *
- *         Nao ha custodia nem arbitro. Divida de aposta nao e exigivel em
- *         juizo (art. 814 do Codigo Civil), entao a garantia aqui e
- *         reputacional: quem nao paga nao aparece no ranking. Ver
- *         docs/modelagem.md.
+ *         Consequencia: credito so nasce de aposta resolvida, e so morre por
+ *         confirmacao de quem tinha a receber. O devedor nao tem caminho
+ *         nenhum para reduzir a propria divida.
  */
-contract InteliBet is ERC20, ERC20Burnable, Ownable {
-    // --- Parametros do token ---------------------------------------------
+contract InteliCredit is ERC20 {
+    /// @notice Contrato que criou este token e o unico que emite e queima.
+    address public immutable controller;
 
-    /// @dev 2 casas: IBET pareia com o centavo do real.
+    error OnlyController(address caller);
+    error NonTransferable();
+
+    modifier onlyController() {
+        if (msg.sender != controller) revert OnlyController(msg.sender);
+        _;
+    }
+
+    constructor(address controller_) ERC20("InteliBet Credit", "IBRL") {
+        controller = controller_;
+    }
+
+    function decimals() public pure override returns (uint8) {
+        return 2;
+    }
+
+    function mint(address to, uint256 amount) external onlyController {
+        _mint(to, amount);
+    }
+
+    function burn(address from, uint256 amount) external onlyController {
+        _burn(from, amount);
+    }
+
+    /// @dev Mint (from == 0) e burn (to == 0) passam; transferencia, nao.
+    function _update(address from, address to, uint256 value) internal override {
+        if (from != address(0) && to != address(0)) revert NonTransferable();
+
+        super._update(from, to, value);
+    }
+}
+
+/**
+ * @title  INTELIBET (IBET) — a ficha e a mesa de apostas
+ * @notice Mesa de tres papeis fixos, gravados no deploy: dois jogadores e um
+ *         juiz. Duas camadas de valor, propositalmente separadas:
+ *
+ *         FICHA (IBET, este contrato) — moeda ficticia da mesa. A tesouraria
+ *         emite a vontade para os dois jogadores. Nao promete valer nada, e
+ *         justamente por isso pode circular livremente: e o que torna a aposta
+ *         visivel on-chain sem mover dinheiro de verdade.
+ *
+ *         CREDITO (IBRL, contrato irmao) — o que precisa ser pago na vida
+ *         real. Nasce so de aposta resolvida, no valor exato apostado.
+ *
+ * @dev    O que sustenta o desenho:
+ *
+ *         1. CUSTODIA. As duas entradas em ficha ficam no contrato desde a
+ *            criacao da aposta. Sem isso a sentenca do juiz nao valeria nada:
+ *            ele declararia o vencedor e o perdedor simplesmente nao pagaria.
+ *
+ *            Como so existem dois jogadores e um juiz que nunca e parte, NAO
+ *            EXISTE auto-aposta — ninguem fabrica vitoria contra si mesmo.
+ *
+ *         2. O JUIZ decide QUEM ganhou, nunca QUANTO. Nao altera valor, nao
+ *            paga terceiro, nao retem nada. E se os dois jogadores
+ *            concordarem, `agreeOn` liquida sem ele: o juiz e desempate, nao
+ *            pedagio.
+ *
+ *         3. COMPENSACAO. Vitoria abate a divida contraria antes de criar
+ *            divida nova. Consequencia: no maximo UM dos dois tem saldo de
+ *            credito em qualquer momento, e esse saldo E a resposta para
+ *            "quem deve quanto a quem", sem ninguem precisar calcular.
+ *
+ *         4. A DIVIDA SO MORRE POR CONFIRMACAO DE QUEM RECEBE. O devedor nao
+ *            tem funcao nenhuma que reduza o que ele deve.
+ *
+ *         Nao ha taxa e nao ha banca: o contrato nao retem nada, em nenhuma
+ *         das duas camadas. Toda situacao terminal devolve ficha para alguem
+ *         — nao existe estado em que IBET fique preso aqui.
+ *
+ *         Ver docs/modelagem.md.
+ */
+contract InteliBet is ERC20, Ownable {
+    // --- Parametros ------------------------------------------------------
+
+    /// @dev 2 casas: a ficha pareia com o centavo, igual ao credito.
     uint8 private constant DECIMALS = 2;
 
-    /// @notice Prazo de validade de uma atestacao de reserva.
-    uint64 public constant ATTESTATION_MAX_AGE = 30 days;
+    /// @notice Prazo usado quando a aposta e criada com `deadline = 0`.
+    uint64 public constant DEFAULT_DEADLINE = 7 days;
 
-    /// @notice Limite do texto da aposta, para o evento nao virar deposito de lixo.
-    uint256 public constant MAX_DESCRIPTION_LENGTH = 200;
-
-    /// @notice Limite do nome, para o painel nao quebrar.
+    uint256 public constant MAX_TERMS_LENGTH = 200;
     uint256 public constant MAX_NAME_LENGTH = 24;
 
-    // --- Parametros do premio --------------------------------------------
+    // --- Papeis e token irmao, fixos no deploy ---------------------------
 
-    /// @notice Taxa sobre aposta paga, em basis points. 500 = 5,00%.
-    uint16 public constant FEE_BPS = 500;
+    address public immutable playerA;
+    address public immutable playerB;
+    address public immutable judge;
 
-    /**
-     * @notice Duracao de uma epoca, em segundos. ZERO = mes de calendario.
-     * @dev    Parametro de deploy porque producao e demonstracao querem coisas
-     *         diferentes. Zero da o ciclo mensal real, alinhado ao dia 1. Um
-     *         valor em segundos da uma janela fixa, util para demonstrar o
-     *         ciclo inteiro dentro de um video.
-     */
+    /// @notice Token de credito, criado por este contrato no construtor.
+    InteliCredit public immutable credit;
+
+    /// @notice Divida liquida a partir da qual o contrato pede acerto real.
+    uint256 public immutable settlementThreshold;
+
+    // --- Epocas ----------------------------------------------------------
+
+    /// @notice Duracao de uma epoca, em segundos. ZERO = mes de calendario.
     uint64 public immutable epochDuration;
 
     /// @notice True quando a epoca acompanha o mes de calendario.
     bool public immutable calendarMonths;
 
-    /// @dev Indice de mes do deploy, marco zero no modo calendario.
-    uint256 private immutable _startMonthIndex;
-
-    /**
-     * @notice Quantos adversarios distintos e preciso vencer na epoca para
-     *         concorrer ao premio.
-     * @dev    Mitigacao (parcial) de auto-aposta: sem isso, duas carteiras
-     *         suas fabricam vitorias e farmam o pote. Producao: 3 ou mais.
-     *         Demonstracao com duas contas: 1.
-     */
-    uint32 public immutable minDistinctOpponents;
-
     /// @notice Momento do deploy. Marco zero da contagem de epocas.
     uint64 public immutable startTime;
 
-    // --- Prova de reserva ------------------------------------------------
+    uint256 private immutable _startMonthIndex;
 
-    /// @notice Reserva atestada, em unidades base (centavos de real).
-    uint256 public reservesAttested;
+    // --- Apostas ---------------------------------------------------------
 
-    /// @notice Hash do comprovante de reserva publicado off-chain.
-    bytes32 public reserveProofHash;
+    enum Status {
+        Open, // proposta feita, aguardando o outro jogador
+        Active, // as duas entradas em custodia
+        Resolved, // decidida, vencedor pago
+        Cancelled, // proposta retirada antes do aceite
+        Refunded // prazo vencido sem decisao, entradas devolvidas
+    }
 
-    /// @notice Momento da ultima atestacao.
-    uint64 public reserveAttestedAt;
+    struct Bet {
+        address proposer;
+        uint128 stake; // valor de CADA lado, em unidades base
+        uint64 deadline;
+        Status status;
+        address winner; // zero ate ser resolvida
+        uint64 resolvedEpoch;
+        bool byAgreement; // true quando os jogadores dispensaram o juiz
+        string terms;
+    }
 
-    // --- Estado do premio ------------------------------------------------
+    Bet[] private _bets;
 
-    /// @notice Pote acumulado por epoca, em unidades base.
-    mapping(uint256 => uint256) public prizePool;
+    /// @notice Voto de cada jogador numa aposta, para o acordo mutuo.
+    mapping(uint256 => mapping(address => address)) public agreementVote;
 
-    /// @notice Valor bruto ganho em apostas, por epoca e por endereco.
+    // --- Placar ----------------------------------------------------------
+
+    /// @notice Valor ganho por epoca e por jogador. Base do ranking mensal.
     mapping(uint256 => mapping(address => uint256)) public grossWon;
 
-    /// @notice Adversarios distintos vencidos, por epoca e por endereco.
-    mapping(uint256 => mapping(address => uint32)) public distinctOpponents;
-
-    /// @notice Lider da epoca — quem mais ganhou, entre os elegiveis.
-    mapping(uint256 => address) public epochLeader;
-
-    /// @notice Valor bruto do lider, usado para a comparacao corrente.
-    mapping(uint256 => uint256) public epochLeaderAmount;
-
-    /// @notice Epocas cujo pote ja foi distribuido ou transferido adiante.
-    mapping(uint256 => bool) public prizeSettled;
-
-    /// @dev Marca se `winner` ja venceu `loser` naquela epoca.
-    mapping(uint256 => mapping(address => mapping(address => bool))) private _alreadyBeat;
+    /// @notice Apostas resolvidas por epoca.
+    mapping(uint256 => uint256) public betsResolved;
 
     // --- Identidade ------------------------------------------------------
 
-    /// @dev Nome de cada endereco. Vazio quando nao ha nome.
     mapping(address => string) private _names;
-
-    /// @dev Se o nome foi declarado pela propria carteira ou atribuido por terceiro.
-    mapping(address => bool) private _selfDeclared;
 
     // --- Eventos ---------------------------------------------------------
 
-    event ReserveAttested(uint256 amount, bytes32 proofHash, uint64 at);
-    event RedemptionRequested(address indexed from, uint256 amount, string payoutRef);
-
-    /**
-     * @notice Uma aposta foi paga. E a unica fonte do ranking publico.
-     * @param loser       quem perdeu e pagou (quem chamou a funcao)
-     * @param winner      quem ganhou
-     * @param amount      valor da aposta em unidades base
-     * @param fee         parte que ficou no pote da epoca
-     * @param epoch       epoca em que foi registrada
-     * @param description sobre o que era a aposta
-     */
-    event BetSettled(
-        address indexed loser,
-        address indexed winner,
-        uint256 amount,
-        uint256 fee,
-        uint256 indexed epoch,
-        string description
-    );
-
-    event LeaderChanged(uint256 indexed epoch, address indexed leader, uint256 grossWon);
-    event PrizeClaimed(uint256 indexed epoch, address indexed winner, uint256 amount);
-    event PrizeRolledOver(uint256 indexed epoch, uint256 amount, uint256 toEpoch);
-
+    event ChipsMinted(address indexed to, uint256 amount);
     event NameSet(address indexed account, string name);
-    event NameAttributed(address indexed account, string name, address indexed by);
-    event NameCleared(address indexed account);
+
+    event BetCreated(uint256 indexed id, address indexed proposer, uint128 stake, uint64 deadline, string terms);
+    event BetAccepted(uint256 indexed id, address indexed opponent);
+    event AgreementVoted(uint256 indexed id, address indexed voter, address winner);
+    event BetResolved(
+        uint256 indexed id, address indexed winner, address indexed loser, uint256 stake, uint256 epoch, bool byAgreement
+    );
+    event BetCancelled(uint256 indexed id);
+    event BetRefunded(uint256 indexed id);
+
+    event CreditNetted(address indexed winner, address indexed loser, uint256 offset, uint256 minted);
+    event SettlementDue(address indexed creditor, address indexed debtor, uint256 amount);
+    event PaymentConfirmed(address indexed creditor, address indexed debtor, uint256 amount);
 
     // --- Erros -----------------------------------------------------------
 
-    error ReserveInsufficient(uint256 supplyAfter, uint256 reserves);
-    error StaleAttestation(uint64 attestedAt, uint64 maxAge);
-    error InvalidCounterparty();
-    error InvalidDescription(uint256 length, uint256 max);
-    error InvalidName(uint256 length, uint256 max);
-    error AmountTooSmall(uint256 amount, uint256 minimum);
-    error EpochNotFinished(uint256 epoch, uint256 current);
-    error PrizeAlreadySettled(uint256 epoch);
+    error NotAPlayer(address caller);
+    error NotTheJudge(address caller);
+    error NotAuthorized(address caller);
+    error WrongStatus(Status current, Status expected);
+    error DeadlinePassed(uint64 deadline);
+    error DeadlineNotReached(uint64 deadline);
+    error InvalidDeadline();
+    error WinnerNotInBet(address winner);
+    error InvalidText(uint256 length, uint256 max);
+    error DuplicateRole();
     error ZeroAddress();
     error ZeroAmount();
+
+    // --- Modificadores ---------------------------------------------------
+
+    modifier onlyPlayer() {
+        if (msg.sender != playerA && msg.sender != playerB) revert NotAPlayer(msg.sender);
+        _;
+    }
 
     // --- Construtor ------------------------------------------------------
 
     /**
-     * @param treasury              Tesouraria: custodia a reserva, atesta e emite.
+     * @param treasury_             Emite as fichas. Vira owner.
+     * @param playerA_              Primeiro jogador da mesa.
+     * @param playerB_              Segundo jogador da mesa.
+     * @param judge_                Quem decide o vencedor. Nunca e jogador.
+     * @param settlementThreshold_  Divida liquida que dispara o pedido de acerto.
      * @param epochDuration_        Segundos por epoca, ou 0 para mes de calendario.
-     * @param minDistinctOpponents_ Adversarios distintos exigidos para concorrer.
      *
-     * @dev Nenhum IBET e emitido no deploy. Como `reserveAttestedAt` comeca em
-     *      zero, o primeiro `mint` ja reverte por atestacao vencida: o contrato
-     *      nasce impedido de emitir sem lastro, sem depender de o operador
-     *      seguir a ordem certa.
+     * @dev O token de credito nasce aqui dentro, com `new`, ja apontando para
+     *      este contrato como controller. Um unico deploy publica os dois, e
+     *      nao existe janela em que o credito esteja sem dono definido.
      */
-    constructor(address treasury, uint64 epochDuration_, uint32 minDistinctOpponents_)
-        ERC20("InteliBet", "IBET")
-        Ownable(treasury)
-    {
-        if (treasury == address(0)) revert ZeroAddress();
+    constructor(
+        address treasury_,
+        address playerA_,
+        address playerB_,
+        address judge_,
+        uint256 settlementThreshold_,
+        uint64 epochDuration_
+    ) ERC20("InteliBet Chip", "IBET") Ownable(treasury_) {
+        if (treasury_ == address(0) || playerA_ == address(0) || playerB_ == address(0) || judge_ == address(0)) {
+            revert ZeroAddress();
+        }
+        // Juiz fora da mesa garantido por construcao — nao ha verificacao por
+        // aposta que alguem possa esquecer de fazer depois.
+        if (playerA_ == playerB_ || judge_ == playerA_ || judge_ == playerB_) revert DuplicateRole();
+
+        playerA = playerA_;
+        playerB = playerB_;
+        judge = judge_;
+        settlementThreshold = settlementThreshold_;
 
         epochDuration = epochDuration_;
         calendarMonths = epochDuration_ == 0;
-        minDistinctOpponents = minDistinctOpponents_;
         startTime = uint64(block.timestamp);
         _startMonthIndex = _monthIndexOf(block.timestamp);
+
+        credit = new InteliCredit(address(this));
     }
 
     function decimals() public pure override returns (uint8) {
         return DECIMALS;
     }
 
-    // --- Reserva ---------------------------------------------------------
+    /// @notice O outro jogador da mesa.
+    function opponentOf(address player) public view returns (address) {
+        if (player == playerA) return playerB;
+        if (player == playerB) return playerA;
+
+        revert NotAPlayer(player);
+    }
+
+    // --- Fichas ----------------------------------------------------------
 
     /**
-     * @notice Publica o saldo da reserva sob custodia e o hash do comprovante.
-     * @dev   Nao valida contra o supply de proposito: atestar reserva ABAIXO
-     *        do supply e um evento legitimo e importante — significa que o
-     *        token esta subcolateralizado, e isso precisa ser visivel em vez
-     *        de impossivel de declarar. O efeito e automatico:
-     *        `collateralizationBps()` cai abaixo de 10000 e `mint` para de
-     *        funcionar sozinho.
+     * @notice Emite fichas para um jogador.
+     * @dev    Sem lastro e sem teto, de proposito: a ficha e explicitamente
+     *         ficticia. O que representa dinheiro real e o credito, e aquele
+     *         so nasce de aposta resolvida.
+     *
+     *         So jogador recebe: ficha fora da mesa nao significa nada.
      */
-    function attestReserves(uint256 amount, bytes32 proofHash) external onlyOwner {
-        reservesAttested = amount;
-        reserveProofHash = proofHash;
-        reserveAttestedAt = uint64(block.timestamp);
-
-        emit ReserveAttested(amount, proofHash, reserveAttestedAt);
-    }
-
-    /// @notice Razao de colateralizacao em basis points. 10000 = 100%.
-    /// @dev    Devolve 0 quando nao ha supply — razao indefinida, nao zero.
-    function collateralizationBps() external view returns (uint256) {
-        uint256 supply = totalSupply();
-        if (supply == 0) return 0;
-
-        return (reservesAttested * 10_000) / supply;
-    }
-
-    /// @notice Reserva excedente ainda disponivel para emissao.
-    function mintableAmount() public view returns (uint256) {
-        uint256 supply = totalSupply();
-        return reservesAttested > supply ? reservesAttested - supply : 0;
-    }
-
-    // --- Emissao e resgate -----------------------------------------------
-
-    /// @notice Emite IBET contra reserva ja atestada. Aqui mora a invariante.
-    function mint(address to, uint256 amount) external onlyOwner {
+    function mintChips(address to, uint256 amount) external onlyOwner {
+        if (to != playerA && to != playerB) revert NotAPlayer(to);
         if (amount == 0) revert ZeroAmount();
-        if (block.timestamp > reserveAttestedAt + ATTESTATION_MAX_AGE) {
-            revert StaleAttestation(reserveAttestedAt, ATTESTATION_MAX_AGE);
-        }
-
-        uint256 supplyAfter = totalSupply() + amount;
-        if (supplyAfter > reservesAttested) revert ReserveInsufficient(supplyAfter, reservesAttested);
 
         _mint(to, amount);
-    }
-
-    /**
-     * @notice Queima IBET e registra o pedido de resgate em reais.
-     * @dev    A queima acontece antes de a tesouraria pagar, entao a
-     *         colateralizacao nunca piora durante um resgate em andamento.
-     */
-    function redeem(uint256 amount, string calldata payoutRef) external {
-        if (amount == 0) revert ZeroAmount();
-
-        _burn(msg.sender, amount);
-        emit RedemptionRequested(msg.sender, amount, payoutRef);
+        emit ChipsMinted(to, amount);
     }
 
     // --- Identidade ------------------------------------------------------
 
-    /**
-     * @notice Registra ou troca o proprio nome no painel.
-     * @dev    `msg.sender` e a chave: ninguem consegue nomear outra pessoa.
-     *         O registro e auto-declarado — nada impede alguem de se chamar
-     *         "Presidente" —, mas a garantia que existe e clara: o nome
-     *         exibido e sempre o que aquele endereco escolheu para si.
-     *
-     *         Nao ha owner nem moderacao aqui. A tesouraria nao pode alterar
-     *         nem apagar o nome de ninguem.
-     */
+    /// @notice Registra o proprio nome. `msg.sender` e a chave: ninguem
+    ///         consegue nomear outra pessoa.
     function setName(string calldata name) external {
-        _validateName(name);
+        uint256 len = bytes(name).length;
+        if (len == 0 || len > MAX_NAME_LENGTH) revert InvalidText(len, MAX_NAME_LENGTH);
 
         _names[msg.sender] = name;
-        _selfDeclared[msg.sender] = true;
-
         emit NameSet(msg.sender, name);
     }
 
-    /// @notice Apaga o proprio nome. Volta a aparecer so o endereco.
-    function clearName() external {
-        delete _names[msg.sender];
-        delete _selfDeclared[msg.sender];
-
-        emit NameCleared(msg.sender);
-    }
-
-    /// @notice Nome de um endereco. String vazia quando nao ha nome.
     function nameOf(address account) external view returns (string memory) {
         return _names[account];
     }
 
-    /// @notice Se aquele nome foi declarado pela propria carteira.
-    function isSelfDeclared(address account) external view returns (bool) {
-        return _selfDeclared[account];
+    /// @notice Nomes dos tres papeis de uma vez, para o painel.
+    function tableNames() external view returns (string memory a, string memory b, string memory j) {
+        return (_names[playerA], _names[playerB], _names[judge]);
+    }
+
+    // --- Ciclo de vida da aposta -----------------------------------------
+
+    /**
+     * @notice Propoe uma aposta e ja deposita a propria entrada em fichas.
+     * @param stake    Valor de CADA lado, em unidades base (centavos).
+     * @param terms    O que esta sendo apostado.
+     * @param deadline Timestamp limite, ou 0 para usar `DEFAULT_DEADLINE`.
+     *
+     * @dev O oponente nao e parametro: so existem dois jogadores, entao o
+     *      contrato sabe quem e o outro. Menos um campo para errar.
+     */
+    function createBet(uint128 stake, string calldata terms, uint64 deadline)
+        external
+        onlyPlayer
+        returns (uint256 id)
+    {
+        if (stake == 0) revert ZeroAmount();
+
+        uint256 len = bytes(terms).length;
+        if (len == 0 || len > MAX_TERMS_LENGTH) revert InvalidText(len, MAX_TERMS_LENGTH);
+
+        uint64 limite = deadline == 0 ? uint64(block.timestamp) + DEFAULT_DEADLINE : deadline;
+        if (limite <= block.timestamp) revert InvalidDeadline();
+
+        _bets.push(
+            Bet({
+                proposer: msg.sender,
+                stake: stake,
+                deadline: limite,
+                status: Status.Open,
+                winner: address(0),
+                resolvedEpoch: 0,
+                byAgreement: false,
+                terms: terms
+            })
+        );
+        id = _bets.length - 1;
+
+        _transfer(msg.sender, address(this), stake);
+
+        emit BetCreated(id, msg.sender, stake, limite, terms);
+    }
+
+    /// @notice O outro jogador aceita e deposita entrada de valor igual.
+    function acceptBet(uint256 id) external onlyPlayer {
+        Bet storage bet = _bets[id];
+
+        if (bet.status != Status.Open) revert WrongStatus(bet.status, Status.Open);
+        if (msg.sender != opponentOf(bet.proposer)) revert NotAuthorized(msg.sender);
+        if (block.timestamp >= bet.deadline) revert DeadlinePassed(bet.deadline);
+
+        bet.status = Status.Active;
+
+        _transfer(msg.sender, address(this), bet.stake);
+
+        emit BetAccepted(id, msg.sender);
+    }
+
+    /// @notice O juiz declara o vencedor.
+    function resolveBet(uint256 id, address winner) external {
+        if (msg.sender != judge) revert NotTheJudge(msg.sender);
+
+        _settle(id, winner, false);
     }
 
     /**
-     * @notice Nomes de varios enderecos de uma vez, com a origem de cada um.
-     * @dev    O painel precisa dos nomes de todos os participantes do ranking;
-     *         uma chamada em lote evita N idas ao no para N pessoas. O segundo
-     *         retorno permite marcar na tela o que ainda nao foi confirmado
-     *         pela propria carteira.
+     * @notice Voto do jogador sobre quem ganhou. Quando os dois apontam a
+     *         mesma pessoa, a aposta liquida na hora, sem o juiz.
+     * @dev    Na maioria das apostas o resultado e obvio para os dois, e
+     *         obrigar a passar pelo juiz seria burocracia. Se discordarem,
+     *         nada acontece e o juiz decide.
      */
-    function namesOf(address[] calldata accounts)
-        external
-        view
-        returns (string[] memory names, bool[] memory selfDeclared)
-    {
-        names = new string[](accounts.length);
-        selfDeclared = new bool[](accounts.length);
+    function agreeOn(uint256 id, address winner) external onlyPlayer {
+        Bet storage bet = _bets[id];
 
-        for (uint256 i = 0; i < accounts.length; i++) {
-            names[i] = _names[accounts[i]];
-            selfDeclared[i] = _selfDeclared[accounts[i]];
+        if (bet.status != Status.Active) revert WrongStatus(bet.status, Status.Active);
+        if (winner != playerA && winner != playerB) revert WinnerNotInBet(winner);
+
+        agreementVote[id][msg.sender] = winner;
+        emit AgreementVoted(id, msg.sender, winner);
+
+        if (agreementVote[id][opponentOf(msg.sender)] == winner) {
+            _settle(id, winner, true);
         }
     }
 
-    function _validateName(string calldata name) private pure {
-        uint256 len = bytes(name).length;
-        if (len == 0 || len > MAX_NAME_LENGTH) revert InvalidName(len, MAX_NAME_LENGTH);
+    /// @notice O proponente retira a proposta enquanto ninguem aceitou.
+    function cancelBet(uint256 id) external {
+        Bet storage bet = _bets[id];
+
+        if (bet.status != Status.Open) revert WrongStatus(bet.status, Status.Open);
+        if (msg.sender != bet.proposer) revert NotAuthorized(msg.sender);
+
+        bet.status = Status.Cancelled;
+
+        _transfer(address(this), bet.proposer, bet.stake);
+
+        emit BetCancelled(id);
+    }
+
+    /**
+     * @notice Devolve as entradas quando o prazo venceu sem decisao.
+     * @dev    Chamavel por QUALQUER PESSOA, de proposito: se dependesse do
+     *         juiz, um juiz sumido prenderia as fichas dos dois para sempre.
+     *         Vale para proposta nao aceita (devolve so o proponente) e para
+     *         aposta ativa (devolve os dois).
+     */
+    function refundExpired(uint256 id) external {
+        Bet storage bet = _bets[id];
+
+        if (bet.status != Status.Open && bet.status != Status.Active) {
+            revert WrongStatus(bet.status, Status.Active);
+        }
+        if (block.timestamp < bet.deadline) revert DeadlineNotReached(bet.deadline);
+
+        bool aceita = bet.status == Status.Active;
+        bet.status = Status.Refunded;
+
+        uint256 stake = bet.stake;
+        _transfer(address(this), bet.proposer, stake);
+        if (aceita) _transfer(address(this), opponentOf(bet.proposer), stake);
+
+        emit BetRefunded(id);
+    }
+
+    /**
+     * @dev Liquida a aposta nas duas camadas: fichas para o vencedor,
+     *      credito compensado. Estado muda antes de qualquer transferencia.
+     */
+    function _settle(uint256 id, address winner, bool byAgreement) private {
+        Bet storage bet = _bets[id];
+
+        if (bet.status != Status.Active) revert WrongStatus(bet.status, Status.Active);
+        if (winner != playerA && winner != playerB) revert WinnerNotInBet(winner);
+
+        address loser = opponentOf(winner);
+        uint256 stake = bet.stake;
+        uint256 epoch = currentEpoch();
+
+        bet.status = Status.Resolved;
+        bet.winner = winner;
+        bet.resolvedEpoch = uint64(epoch);
+        bet.byAgreement = byAgreement;
+
+        grossWon[epoch][winner] += stake;
+        betsResolved[epoch] += 1;
+
+        // Camada 1: as duas entradas em ficha vao para o vencedor.
+        _transfer(address(this), winner, stake * 2);
+
+        // Camada 2: a divida real, compensada.
+        _netCredit(winner, loser, stake);
+
+        emit BetResolved(id, winner, loser, stake, epoch, byAgreement);
+    }
+
+    // --- Credito ---------------------------------------------------------
+
+    /**
+     * @dev Compensacao: a vitoria abate primeiro a divida contraria e so
+     *      depois cria divida nova.
+     *
+     *      Exemplo — voce ganha 50 e o oponente ja tinha 30 a receber:
+     *      queima 30 dele, emite 20 para voce. Sobra o liquido.
+     *
+     *      Invariante que isso garante: NO MAXIMO UM dos dois tem saldo de
+     *      credito em qualquer momento. O saldo E a resposta para "quem deve
+     *      quanto a quem" — ninguem precisa calcular nada.
+     */
+    function _netCredit(address winner, address loser, uint256 amount) private {
+        uint256 anterior = credit.balanceOf(winner);
+        uint256 contraria = credit.balanceOf(loser);
+        uint256 abatido = contraria >= amount ? amount : contraria;
+
+        if (abatido > 0) credit.burn(loser, abatido);
+
+        uint256 emitido = amount - abatido;
+        if (emitido > 0) credit.mint(winner, emitido);
+
+        emit CreditNetted(winner, loser, abatido, emitido);
+
+        uint256 agora = anterior + emitido;
+        if (agora >= settlementThreshold && anterior < settlementThreshold) {
+            emit SettlementDue(winner, loser, agora);
+        }
+    }
+
+    /**
+     * @notice Quem tinha a receber declara que recebeu, e o credito e queimado.
+     * @dev    So o credor pode chamar, porque so ele sabe se o dinheiro
+     *         chegou. O devedor nao tem funcao nenhuma que reduza a propria
+     *         divida — se tivesse, o registro nao valeria nada.
+     */
+    function confirmPayment(uint256 amount) external onlyPlayer {
+        if (amount == 0) revert ZeroAmount();
+
+        credit.burn(msg.sender, amount);
+        emit PaymentConfirmed(msg.sender, opponentOf(msg.sender), amount);
+    }
+
+    /**
+     * @notice Quem deve quanto a quem, agora.
+     * @return creditor Quem tem a receber (zero se ninguem deve nada)
+     * @return debtor   Quem tem a pagar
+     * @return amount   Valor liquido em unidades base
+     */
+    function netPosition() external view returns (address creditor, address debtor, uint256 amount) {
+        uint256 a = credit.balanceOf(playerA);
+        if (a > 0) return (playerA, playerB, a);
+
+        uint256 b = credit.balanceOf(playerB);
+        if (b > 0) return (playerB, playerA, b);
+
+        return (address(0), address(0), 0);
+    }
+
+    // --- Leitura das apostas ---------------------------------------------
+
+    function getBet(uint256 id) external view returns (Bet memory) {
+        return _bets[id];
+    }
+
+    function betCount() external view returns (uint256) {
+        return _bets.length;
+    }
+
+    /// @notice Fichas em custodia agora: entradas de apostas nao liquidadas.
+    function chipsInEscrow() external view returns (uint256 total) {
+        for (uint256 i = 0; i < _bets.length; i++) {
+            Status s = _bets[i].status;
+            if (s == Status.Open) total += _bets[i].stake;
+            else if (s == Status.Active) total += uint256(_bets[i].stake) * 2;
+        }
+    }
+
+    /// @notice Resumo da mesa, numa chamada so, para o painel.
+    function tableSummary()
+        external
+        view
+        returns (
+            uint256 epoch,
+            uint256 epochEnds,
+            uint256 wonA,
+            uint256 wonB,
+            uint256 chipsA,
+            uint256 chipsB,
+            address creditor,
+            uint256 owed,
+            uint256 totalBets
+        )
+    {
+        epoch = currentEpoch();
+        epochEnds = epochEndsAt(epoch);
+        wonA = grossWon[epoch][playerA];
+        wonB = grossWon[epoch][playerB];
+        chipsA = balanceOf(playerA);
+        chipsB = balanceOf(playerB);
+
+        uint256 a = credit.balanceOf(playerA);
+        uint256 b = credit.balanceOf(playerB);
+        if (a > 0) (creditor, owed) = (playerA, a);
+        else if (b > 0) (creditor, owed) = (playerB, b);
+
+        totalBets = _bets.length;
     }
 
     // --- Epocas ----------------------------------------------------------
@@ -412,127 +633,5 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
         uint256 doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
 
         return (era * 146_097 + doe - 719_468) * 86400;
-    }
-
-    /// @notice Se o endereco ja cumpre o minimo de adversarios distintos.
-    function isEligible(uint256 epoch, address account) public view returns (bool) {
-        return distinctOpponents[epoch][account] >= minDistinctOpponents;
-    }
-
-    // --- Pagamento de aposta ---------------------------------------------
-
-    /**
-     * @notice Paga uma aposta perdida, cobra a taxa e registra o resultado.
-     * @dev    Chamada por QUEM PERDEU. O pagador e sempre `msg.sender`, nunca
-     *         um parametro: ninguem consegue plantar uma derrota na conta de
-     *         outra pessoa, porque o valor sai do saldo de quem chama.
-     *
-     *         Do valor apostado, 5% ficam no pote da epoca e o resto vai
-     *         direto para quem ganhou. O contrato nunca custodia o valor da
-     *         aposta — so o pote.
-     *
-     *         O RANKING E POR VALOR BRUTO GANHO, nao por saldo liquido. E
-     *         decisao tecnica com efeito de produto: bruto so sobe, entao
-     *         manter o lider e uma comparacao de uma linha. Saldo liquido
-     *         desceria quando alguem perde, e achar o novo lider exigiria
-     *         varrer todos os participantes — impossivel numa transacao.
-     *
-     * @param winnerName Nome para o vencedor, ou string vazia para nao mexer.
-     *        So e aplicado se ele ainda nao tiver NENHUM nome: nao sobrescreve
-     *        auto-declaracao nem atribuicao anterior. Serve para quem recebe
-     *        uma aposta sem nunca ter usado o contrato aparecer no painel com
-     *        nome — e ele pode trocar depois, chamando `setName`.
-     */
-    function settleBet(address winner, uint256 amount, string calldata description, string calldata winnerName)
-        external
-    {
-        if (winner == address(0)) revert ZeroAddress();
-        if (winner == msg.sender || winner == address(this)) revert InvalidCounterparty();
-
-        // Abaixo disso a taxa truncaria para zero e a aposta nao alimentaria
-        // o pote — o que abriria um caminho de registro gratuito no ranking.
-        uint256 minimum = 10_000 / FEE_BPS; // 20 unidades base = R$ 0,20
-        if (amount < minimum) revert AmountTooSmall(amount, minimum);
-
-        uint256 len = bytes(description).length;
-        if (len == 0 || len > MAX_DESCRIPTION_LENGTH) revert InvalidDescription(len, MAX_DESCRIPTION_LENGTH);
-
-        uint256 fee = (amount * FEE_BPS) / 10_000;
-        uint256 epoch = currentEpoch();
-
-        _transfer(msg.sender, winner, amount - fee);
-        _transfer(msg.sender, address(this), fee);
-
-        prizePool[epoch] += fee;
-        _registerWin(epoch, winner, msg.sender, amount);
-
-        if (bytes(winnerName).length > 0 && bytes(_names[winner]).length == 0) {
-            _validateName(winnerName);
-            _names[winner] = winnerName;
-
-            emit NameAttributed(winner, winnerName, msg.sender);
-        }
-
-        emit BetSettled(msg.sender, winner, amount, fee, epoch, description);
-    }
-
-    /// @dev Atualiza placar, contagem de adversarios distintos e lider.
-    function _registerWin(uint256 epoch, address winner, address loser, uint256 amount) private {
-        if (!_alreadyBeat[epoch][winner][loser]) {
-            _alreadyBeat[epoch][winner][loser] = true;
-            distinctOpponents[epoch][winner] += 1;
-        }
-
-        uint256 total = grossWon[epoch][winner] + amount;
-        grossWon[epoch][winner] = total;
-
-        // A elegibilidade e reavaliada a cada aposta. Como o bruto so sobe,
-        // quem vira elegivel nesta chamada ja e comparado com o lider aqui.
-        if (total > epochLeaderAmount[epoch] && distinctOpponents[epoch][winner] >= minDistinctOpponents) {
-            epochLeaderAmount[epoch] = total;
-            epochLeader[epoch] = winner;
-
-            emit LeaderChanged(epoch, winner, total);
-        }
-    }
-
-    // --- Premio ----------------------------------------------------------
-
-    /**
-     * @notice Entrega o pote da epoca ao lider dela.
-     * @dev    Sem restricao de quem chama, de proposito: se dependesse do
-     *         ganhador, um ganhador desatento deixaria o pote parado, e se
-     *         dependesse da tesouraria ela teria poder de reter. Qualquer um
-     *         aciona; o valor vai para quem o contrato registrou como lider.
-     *
-     *         Epoca sem lider elegivel — porque ninguem venceu adversarios
-     *         distintos suficientes — nao queima o pote: ele passa para a
-     *         epoca corrente.
-     *
-     *         Nao existe funcao que permita a tesouraria sacar o pote. O
-     *         unico caminho de saida do saldo do contrato e este.
-     */
-    function claimPrize(uint256 epoch) external {
-        uint256 current = currentEpoch();
-        if (epoch >= current) revert EpochNotFinished(epoch, current);
-        if (prizeSettled[epoch]) revert PrizeAlreadySettled(epoch);
-
-        prizeSettled[epoch] = true;
-
-        uint256 pot = prizePool[epoch];
-        address winner = epochLeader[epoch];
-
-        if (pot == 0) return;
-
-        prizePool[epoch] = 0;
-
-        if (winner == address(0)) {
-            prizePool[current] += pot;
-            emit PrizeRolledOver(epoch, pot, current);
-            return;
-        }
-
-        _transfer(address(this), winner, pot);
-        emit PrizeClaimed(epoch, winner, pot);
     }
 }

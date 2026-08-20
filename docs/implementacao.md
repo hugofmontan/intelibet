@@ -1,12 +1,13 @@
 # Etapa 2 — Implementação
 
-| Peça | Papel | Arquivo |
+| Peça | Papel | Onde |
 |---|---|---|
-| **InteliBet** | o token ERC-20 — a entrega | [`contracts/InteliBet.sol`](../contracts/InteliBet.sol) |
-| **Ranking** | página estática que lê os eventos e mostra pote, líder e classificação | [`ranking/index.html`](../ranking/index.html) |
+| **InteliBet** (`IBET`) | ficha, custódia, apostas, placar | [`contracts/InteliBet.sol`](../contracts/InteliBet.sol) |
+| **InteliCredit** (`IBRL`) | registro de dívida | mesmo arquivo |
+| **Painel** | estado da mesa + explicação | [`index.html`](../index.html) |
 
-Compilador: **Solidity ^0.8.20** · Biblioteca: **OpenZeppelin Contracts v5.x**
-**Um contrato, um arquivo** — cerca de 400 linhas com comentários.
+Compilador **Solidity ^0.8.20**, biblioteca **OpenZeppelin v5**.
+Dois contratos, um arquivo, **um único deploy**.
 
 ---
 
@@ -16,355 +17,216 @@ A aula trata explicitamente de reutilização segura via OpenZeppelin. Reescreve
 `transfer`, `approve` e a contabilidade de allowance à mão significaria
 reintroduzir bugs que a biblioteca já resolveu.
 
-| Herança | O que traz |
-|---|---|
-| `ERC20` | saldo, allowance, eventos `Transfer` / `Approval` |
-| `ERC20Burnable` | `burn` e `burnFrom`, usados pelo resgate |
-| `Ownable` | `owner`, `onlyOwner` |
+O que é autoral é só o que a ideia exige: custódia, compensação de dívida,
+papéis e aritmética de calendário.
 
-O autoral é o que a ideia exige: prova de reserva, invariante do peg, registro
-de aposta e o mecanismo de época/prêmio.
-
-> **O que ficou de fora.** `ERC20Pausable` e lista de contas congeladas
-> existiram numa versão anterior. Saíram: controles de compliance de stablecoin
-> operada comercialmente, que aqui só aumentariam a superfície sem servir ao
-> problema.
-
----
-
-## 2. Prova de reserva
+## 2. Um deploy, dois contratos
 
 ```solidity
-uint256 public reservesAttested;   // reserva em centavos
-bytes32 public reserveProofHash;   // hash do extrato publicado off-chain
-uint64  public reserveAttestedAt;  // quando foi atestada
-```
-
-`attestReserves(amount, proofHash)` publica os três de uma vez e emite
-`ReserveAttested`.
-
-**Não valida contra o supply, de propósito.** Atestar reserva *abaixo* do supply
-é um evento legítimo — significa que o token está subcolateralizado, e isso
-precisa ser visível em vez de impossível de declarar. O efeito é automático:
-`collateralizationBps()` cai abaixo de 10000 e `mint` para de funcionar sozinho.
-
-## 3. A invariante do peg
-
-```solidity
-function mint(address to, uint256 amount) external onlyOwner {
-    if (amount == 0) revert ZeroAmount();
-    if (block.timestamp > reserveAttestedAt + ATTESTATION_MAX_AGE) {
-        revert StaleAttestation(reserveAttestedAt, ATTESTATION_MAX_AGE);
-    }
-    uint256 supplyAfter = totalSupply() + amount;
-    if (supplyAfter > reservesAttested) revert ReserveInsufficient(supplyAfter, reservesAttested);
-    _mint(to, amount);
+constructor(...) ERC20("InteliBet Chip", "IBET") Ownable(treasury_) {
+    ...
+    credit = new InteliCredit(address(this));
 }
 ```
 
-Três guardas: valor zero, atestação vencida, teto de reserva.
+O token de crédito é criado **pelo próprio contrato da mesa**, dentro do
+construtor, já apontando para ele como `controller`. Três ganhos:
 
-Efeito colateral elegante da segunda: como `reserveAttestedAt` começa em zero,
-**o primeiro `mint` reverte enquanto não houver nenhuma atestação**. O contrato
-nasce impedido de emitir sem lastro. Nenhum IBET é emitido no construtor, pelo
-mesmo motivo.
+- **um deploy publica os dois**, sem ordem para errar;
+- não existe janela em que o crédito esteja sem controlador definido;
+- o `controller` é `immutable` e nunca foi um endereço externo, então não há
+  passo de "autorizar o contrato" que alguém possa esquecer ou fazer errado.
 
-**A taxa não interfere aqui.** Os 5% saem de uma conta e entram na do próprio
-contrato — o `totalSupply` não muda, então a invariante continua valendo. O pote
-é IBET lastreado como qualquer outro.
-
-## 4. `settleBet` — transferir, cobrar e registrar
+## 3. O crédito, e as duas restrições que o definem
 
 ```solidity
-function settleBet(address winner, uint256 amount, string calldata description) external {
-    if (winner == address(0)) revert ZeroAddress();
-    if (winner == msg.sender || winner == address(this)) revert InvalidCounterparty();
-
-    uint256 minimum = 10_000 / FEE_BPS;               // 20 = R$ 0,20
-    if (amount < minimum) revert AmountTooSmall(amount, minimum);
-
-    uint256 len = bytes(description).length;
-    if (len == 0 || len > MAX_DESCRIPTION_LENGTH) revert InvalidDescription(len, MAX_DESCRIPTION_LENGTH);
-
-    uint256 fee   = (amount * FEE_BPS) / 10_000;
-    uint256 epoch = currentEpoch();
-
-    _transfer(msg.sender, winner, amount - fee);
-    _transfer(msg.sender, address(this), fee);
-
-    prizePool[epoch] += fee;
-    _registerWin(epoch, winner, msg.sender, amount);
-
-    emit BetSettled(msg.sender, winner, amount, fee, epoch, description);
+function _update(address from, address to, uint256 value) internal override {
+    if (from != address(0) && to != address(0)) revert NonTransferable();
+    super._update(from, to, value);
 }
 ```
 
-Decisões que importam:
+Mint (`from == 0`) e burn (`to == 0`) passam; transferência entre pessoas, não.
+`_update` é o ponto único por onde toda movimentação de saldo passa na v5, então
+não existe caminho que escape da regra.
 
-- **O pagador é sempre `msg.sender`**, nunca um parâmetro. Ninguém consegue
-  plantar uma derrota na conta de outra pessoa, porque o valor sai do saldo de
-  quem chama.
-- **A taxa não incide sobre `transfer`.** Um ERC-20 que entrega menos do que foi
-  mandado (*fee on transfer*) quebra carteira, exchange e qualquer contrato que
-  faça conta antes de transferir. Aqui `transfer` continua limpo e previsível.
-- **Aposta mínima de 20 unidades base.** Abaixo disso `(amount * 500) / 10000`
-  trunca para zero, e a aposta entraria no ranking **sem** alimentar o pote —
-  um caminho de registro gratuito. A guarda fecha isso.
-- **Duas transferências, dois eventos `Transfer`.** Uma para o vencedor, outra
-  para o contrato. É mais legível no explorador do que uma transferência única
-  com contabilidade escondida.
-- **`description` obrigatória e limitada a 200 bytes.** Sem limite superior o
-  evento vira depósito de lixo; sem limite inferior, alguém registra aposta sem
-  dizer sobre o quê.
+A segunda restrição é `onlyController` em `mint` e `burn`. Somadas, produzem a
+garantia central do projeto:
 
-## 5. O ranking on-chain: por que **bruto** e não saldo líquido
+> **Crédito só nasce de aposta resolvida, e só morre por confirmação de quem
+> tinha a receber.** O devedor não tem função nenhuma que reduza a própria
+> dívida.
+
+## 4. A compensação
 
 ```solidity
-function _registerWin(uint256 epoch, address winner, address loser, uint256 amount) private {
-    if (!_alreadyBeat[epoch][winner][loser]) {
-        _alreadyBeat[epoch][winner][loser] = true;
-        distinctOpponents[epoch][winner] += 1;
-    }
+function _netCredit(address winner, address loser, uint256 amount) private {
+    uint256 anterior  = credit.balanceOf(winner);
+    uint256 contraria = credit.balanceOf(loser);
+    uint256 abatido   = contraria >= amount ? amount : contraria;
 
-    uint256 total = grossWon[epoch][winner] + amount;
-    grossWon[epoch][winner] = total;
-
-    if (total > epochLeaderAmount[epoch] && distinctOpponents[epoch][winner] >= minDistinctOpponents) {
-        epochLeaderAmount[epoch] = total;
-        epochLeader[epoch] = winner;
-        emit LeaderChanged(epoch, winner, total);
-    }
+    if (abatido > 0) credit.burn(loser, abatido);
+    uint256 emitido = amount - abatido;
+    if (emitido > 0) credit.mint(winner, emitido);
+    ...
 }
 ```
 
-**A restrição técnica que virou decisão de produto.** Saldo líquido
-(ganhou − perdeu) **desce** quando alguém perde. Se o líder fosse por líquido,
-uma derrota do primeiro colocado obrigaria a percorrer todos os participantes
-para achar o novo líder — o que não cabe numa transação e pode estourar o gás do
-bloco.
+Abate primeiro, emite depois. A invariante que isso mantém — **no máximo um dos
+dois com saldo** — não é verificada em lugar nenhum: é consequência da ordem das
+operações. Se o vencedor recebe, é porque a dívida contrária foi zerada antes; e
+ele só tinha saldo se o oponente já estava zerado.
 
-Ganho bruto só sobe. Manter o líder vira uma comparação de uma linha. E, como
-métrica, "quem mais ganhou apostas neste mês" é mais direto de entender do que
-saldo líquido. A página mostra os dois: bruto da época (que decide o prêmio) e
-líquido geral (o retrato de longo prazo).
+O evento `SettlementDue` é emitido **na travessia** do limiar, não a cada
+liquidação: a comparação usa o saldo anterior e o novo, então o aviso aparece uma
+vez, quando a dívida cruza a linha.
 
-**Sobre a elegibilidade.** A condição de adversários distintos é reavaliada a
-cada aposta. Como o bruto só cresce, quem se torna elegível numa chamada já é
-comparado com o líder ali mesmo — não fica um caso em que alguém "virou
-elegível" e ninguém percebeu.
+## 5. A custódia
 
-## 6. Épocas
+O valor da aposta sai da carteira e vai para o endereço do contrato via
+`_transfer` interno — sem `approve`, sem `transferFrom`, sem passo de aprovação
+para o usuário esquecer.
 
-```solidity
-function currentEpoch() public view returns (uint256) {
-    return (block.timestamp - startTime) / epochDuration;
-}
+A máquina de estados:
+
+```
+                accept()              agreeOn() x2 / resolveBet()
+   Open  ──────────────────►  Active  ──────────────────────────►  Resolved
+     │                          │
+     │ cancel()                 │ refundExpired()
+     ▼                          ▼
+  Cancelled                  Refunded
 ```
 
-O contrato tem **dois modos de época**, escolhidos no deploy:
+**Todo estado terminal devolve ficha para alguém.** É o requisito mais importante
+de um contrato de custódia, e o que a máquina foi desenhada para garantir: não
+existe caminho que deixe IBET preso.
 
-| `epochDuration_` | Modo | Uso |
-|---|---|---|
-| `0` | **mês de calendário** — vira à meia-noite UTC do dia 1º | produção |
-| `600` | janela fixa de 10 minutos | demonstração em vídeo |
+`refundExpired` cobre os dois casos — proposta não aceita (devolve só o
+proponente) e aposta ativa (devolve os dois) — e é **chamável por qualquer
+pessoa**. Se dependesse do juiz, a inércia dele prenderia o dinheiro dos dois.
 
-O modo calendário é o que a ideia pede: "o maior ganhador **do mês**" só faz
-sentido alinhado ao mês real, não a uma janela de 30 dias contada do deploy.
-Mas 30 dias de espera tornariam o prêmio impossível de demonstrar — daí o
-segundo modo existir. **A mesma base de código serve aos dois**, e a escolha é
-um argumento do construtor.
+## 6. Papéis garantidos por construção
 
-### A aritmética de calendário
+```solidity
+if (playerA_ == playerB_ || judge_ == playerA_ || judge_ == playerB_) revert DuplicateRole();
+```
+
+O juiz fora da mesa é verificado **uma vez, no deploy**, e vale para sempre. A
+alternativa — checar a cada aposta — seria mais cara e teria um caminho a mais
+para esquecer.
+
+Consequência de projeto: `createBet` **não recebe o endereço do oponente**. Só
+existem dois jogadores, então `opponentOf(msg.sender)` resolve sozinho. Um campo
+a menos para o usuário errar.
+
+## 7. `agreeOn`: o juiz como desempate
+
+```solidity
+agreementVote[id][msg.sender] = winner;
+if (agreementVote[id][opponentOf(msg.sender)] == winner) _settle(id, winner, true);
+```
+
+Cada jogador registra quem acha que ganhou. Quando os dois apontam a mesma
+pessoa, liquida na hora. Se discordarem, nada acontece e o juiz decide.
+
+Na maioria das apostas o resultado é óbvio para os dois, e obrigar a passar pelo
+juiz seria burocracia. A liquidação guarda `byAgreement` para o painel poder
+mostrar *como* cada aposta foi decidida.
+
+## 8. Ordem das operações em `_settle`
+
+```solidity
+bet.status = Status.Resolved;                  // estado primeiro
+bet.winner = winner;
+grossWon[epoch][winner] += stake;
+
+_transfer(address(this), winner, stake * 2);   // fichas
+_netCredit(winner, loser, stake);              // dívida
+```
+
+Checks-effects-interactions: o estado muda antes de qualquer transferência. Mesmo
+que houvesse reentrada, a segunda entrada encontraria `Resolved` e reverteria em
+`WrongStatus`.
+
+## 9. Aritmética de calendário
 
 `block.timestamp` é um contador de segundos; não existe "mês" na EVM. Converter
 timestamp em ano/mês exige lidar com meses de tamanhos diferentes, anos
 bissextos e a regra dos séculos (2000 é bissexto, 2100 não é).
 
 O contrato usa o algoritmo **days_from_civil / civil_from_days de Howard
-Hinnant** — aritmética inteira, sem laço, sem tabela de meses:
+Hinnant** — aritmética inteira, sem laço, sem tabela de meses. A ideia central: o
+calendário gregoriano se repete a cada **400 anos**, que têm exatamente 146.097
+dias. Reduzindo a data a "qual ciclo de 400 anos" e "qual dia dentro do ciclo",
+as irregularidades viram divisões inteiras.
 
-```solidity
-function _monthIndexOf(uint256 timestamp) private pure returns (uint256) {
-    uint256 z = timestamp / 86400 + 719_468;
-    uint256 era = z / 146_097;              // ciclo de 400 anos
-    uint256 doe = z - era * 146_097;
-    uint256 yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    ...
-    return y * 12 + (m - 1);
-}
-```
-
-A ideia central: o calendário gregoriano se repete a cada **400 anos**, que têm
-exatamente 146.097 dias. Reduzindo a data a "qual ciclo de 400 anos" e "qual dia
-dentro do ciclo", as irregularidades de bissexto viram divisões inteiras.
-
-`currentEpoch()` devolve `mêsAtual − mêsDoDeploy`, então a época 0 continua
-sendo a do deploy nos dois modos. `epochEndsAt` devolve o primeiro segundo do
-mês seguinte.
-
-> **A época 0 quase nunca é um mês inteiro** — vai do deploy até a virada. É
-> proposital: alinhar ao calendário importa mais do que a primeira época ter
-> duração cheia.
-
-**Verificação.** As duas funções foram portadas para Python e comparadas com
+**Verificação:** as duas funções foram portadas para Python e comparadas com
 `datetime` dia a dia de 2024 a 2031, mais os casos de borda (29/02/2024,
 31/12 23:59:59, 2000 e 2100). Zero divergências.
 
-`minDistinctOpponents` também é parâmetro de deploy: 3 em produção, 1 numa
-demonstração com duas contas. Todos são `immutable` — regra de prêmio que muda
-no meio do jogo não é regra.
+> A época 0 quase nunca é um mês inteiro — vai do deploy até a virada. É
+> proposital: alinhar ao calendário importa mais do que a primeira época ter
+> duração cheia.
 
-## 7. `claimPrize`
+## 10. Erros customizados
 
-```solidity
-function claimPrize(uint256 epoch) external {
-    uint256 current = currentEpoch();
-    if (epoch >= current) revert EpochNotFinished(epoch, current);
-    if (prizeSettled[epoch]) revert PrizeAlreadySettled(epoch);
+`NotAPlayer`, `NotTheJudge`, `NotAuthorized`, `WrongStatus(atual, esperado)`,
+`DeadlinePassed`, `DeadlineNotReached`, `WinnerNotInBet`, `InvalidText(len, max)`,
+`DuplicateRole`, `NonTransferable`, `OnlyController`.
 
-    prizeSettled[epoch] = true;
-    uint256 pot = prizePool[epoch];
-    address winner = epochLeader[epoch];
-    if (pot == 0) return;
+Além de gastarem menos gás que `require` com string, **carregam o dado** — no
+Remix aparece exatamente qual status a aposta tem e qual era esperado. A reversão
+vira conteúdo demonstrável em vez de mensagem genérica.
 
-    prizePool[epoch] = 0;
+## 11. O painel
 
-    if (winner == address(0)) {
-        prizePool[current] += pot;
-        emit PrizeRolledOver(epoch, pot, current);
-        return;
-    }
+[`index.html`](../index.html) é um arquivo, sem banco, sem servidor, sem chave de
+API. Uma chamada a `tableSummary()` traz época, fim do mês, ganhos, fichas e
+posição líquida de uma vez; o resto vem de `getBet(i)`.
 
-    _transfer(address(this), winner, pot);
-    emit PrizeClaimed(epoch, winner, pot);
-}
-```
+Mostra a posição líquida em destaque ("Leon deve R$ X ao Hugo"), o placar do mês,
+cada aposta com seu estado, e a explicação da dinâmica com diagramas.
 
-- **Sem restrição de quem chama.** O valor vai para o líder registrado, não para
-  quem chamou. Se dependesse do ganhador, um ganhador desatento deixaria o pote
-  parado; se dependesse da tesouraria, ela teria poder de reter.
-- **Marca antes de pagar** (`prizeSettled = true` na frente do `_transfer`):
-  ordem checks-effects-interactions, mesmo o destinatário sendo o próprio token.
-- **Época sem líder elegível não queima o pote** — ele passa para a época
-  corrente. Prêmio que evapora desincentiva participar justamente nos meses
-  fracos, que são os que mais precisam de incentivo.
-- **Não existe função que permita ao owner sacar o pote.** Este é o único
-  caminho de saída do saldo do contrato, e vale conferir isso lendo o código —
-  é a garantia central do "a tesouraria não fica com nada".
-
-## 8. Erros customizados
-
-`ReserveInsufficient`, `StaleAttestation`, `InvalidCounterparty`,
-`InvalidDescription(len, max)`, `AmountTooSmall(amount, min)`,
-`EpochNotFinished(epoch, current)`, `PrizeAlreadySettled`, `ZeroAmount`,
-`ZeroAddress`. Além de gastarem menos gás que `require` com string, **carregam o
-dado** — no Remix aparece exatamente qual época é a corrente, quanto foi
-tentado, qual era a reserva. A reversão vira conteúdo demonstrável.
+Nomes vêm de `tableNames()` e são **escapados** antes de entrar no HTML: nome é
+texto escrito por usuário, e sem tratamento alguém registraria
+`<img src=x onerror=...>` e executaria script na página de quem abrisse.
 
 ---
 
-## 9. O ranking
-
-`ranking/index.html`: um arquivo, sem banco, sem servidor, sem chave de API.
-
-Lê **on-chain** o que é autoritativo (época atual, pote, líder, fim da época,
-mínimo de adversários) e **dos eventos** o que é histórico (todas as apostas).
-A separação é intencional: se a página e o contrato discordarem, o contrato está
-certo, e o pote mostrado é o que o `claimPrize` vai pagar.
-
-Mostra: pote da época · líder · tempo restante · classificação da época com
-adversários distintos e selo de elegibilidade · placar geral por saldo líquido ·
-feed das últimas apostas com valor, taxa e link para a transação.
-
-**Configuração** — duas linhas no topo do `<script>`: `CONTRATO` e
-`BLOCO_INICIAL`, mais o mapa opcional de `APELIDOS`.
-
----
-
-## 9b. Identidade: `setName`
-
-A blockchain só conhece endereços. Para o painel mostrar "Hugo" em vez de
-`0xf6e3…eaf0`, alguém precisa gravar essa associação.
-
-```solidity
-function setName(string calldata name) external {
-    uint256 len = bytes(name).length;
-    if (len == 0 || len > MAX_NAME_LENGTH) revert InvalidName(len, MAX_NAME_LENGTH);
-    _names[msg.sender] = name;
-    emit NameSet(msg.sender, name);
-}
-```
-
-- **`msg.sender` é a chave.** Ninguém consegue nomear outra pessoa — só você
-  assina pela sua carteira. O registro continua auto-declarado (nada impede
-  alguém de se chamar "Presidente"), mas a garantia é clara: o nome exibido é
-  sempre o que aquele endereço escolheu para si.
-- **A tesouraria não tem poder aqui.** `setName` e `clearName` não são
-  `onlyOwner`: o owner não altera nem apaga o nome de ninguém.
-- **`namesOf(address[])` em lote** — o painel precisa dos nomes de todos os
-  participantes; uma chamada evita N idas ao nó.
-
-### Por que dentro do token, e o que isso custa
-
-A separação em dois contratos seria a arquitetura mais limpa: nome não é
-assunto de um ERC-20. A escolha foi pelo arquivo único, e o motivo é
-operacional — **um deploy, um endereço, verificação single-file**. Numa entrega
-que precisa ser publicada, demonstrada em vídeo e conferida por outra pessoa,
-cada contrato a mais é mais uma coisa que pode sair do lugar.
-
-O custo está declarado: **mudar qualquer coisa no registro de nomes passa a
-exigir republicar o token**, perdendo reserva atestada, emissão e endereço. É
-um custo aceitável para um registro que é cosmético e estável.
-
-### Um detalhe de segurança que os nomes criam
-
-Nome é **string escrita por usuário** e vai parar no HTML do painel. Sem
-tratamento, alguém registraria `<img src=x onerror=...>` e executaria script na
-página de todo mundo. Por isso o nome passa por `escapar()` antes de ser
-inserido — a mesma função que já tratava a descrição das apostas.
-
-É o tipo de coisa que só aparece quando dado livre de terceiro entra na tela: o
-painel anterior lia apenas números e endereços, formatos que não carregam
-código.
-
----
-
-## 10. Matriz de verificação antes do deploy
+## 12. Matriz de verificação antes do deploy
 
 | # | Cenário | Esperado |
 |---|---|---|
-| 1 | `mint` sem nenhuma atestação | reverte `StaleAttestation` |
-| 2 | `attestReserves(50000, hash)` → `mint(A, 30000)` | sucesso, 300,00 IBET |
-| 3 | `mint` acima da reserva | reverte `ReserveInsufficient(60000, 50000)` |
-| 4 | `transfer(B, 5000)` | sucesso, **sem** taxa |
-| 5 | `settleBet(A, 2000, "…")` por B | A recebe 1900, contrato fica com 100 |
-| 6 | `prizePool(epoca)` | `100` |
-| 7 | `settleBet` para si mesmo | reverte `InvalidCounterparty` |
-| 8 | `settleBet` com valor 10 | reverte `AmountTooSmall(10, 20)` |
-| 9 | `settleBet` com descrição vazia | reverte `InvalidDescription(0, 200)` |
-| 10 | `epochLeader(epoca)` após apostas suficientes | endereço do líder |
-| 11 | `claimPrize(epoca)` com a época em curso | reverte `EpochNotFinished` |
-| 12 | `claimPrize(epoca)` após virar a época | líder recebe o pote |
-| 13 | `claimPrize` da mesma época de novo | reverte `PrizeAlreadySettled` |
-| 14 | Época sem líder elegível | pote passa adiante (`PrizeRolledOver`) |
+| 1 | `mintChips` para endereço fora da mesa | reverte `NotAPlayer` |
+| 2 | `createBet` por quem não é jogador | reverte `NotAPlayer` |
+| 3 | `createBet` + `balanceOf(contrato)` | entrada em custódia |
+| 4 | `acceptBet` pelo próprio proponente | reverte `NotAuthorized` |
+| 5 | `acceptBet` pelo oponente | status `Active`, duas entradas travadas |
+| 6 | `resolveBet` por um jogador | reverte `NotTheJudge` |
+| 7 | `resolveBet` pelo juiz | fichas ao vencedor + crédito emitido |
+| 8 | `credit.transfer(...)` | reverte `NonTransferable` |
+| 9 | `credit.mint(...)` chamado por fora | reverte `OnlyController` |
+| 10 | Segunda aposta, vencida pelo outro | crédito **compensa** em vez de somar |
+| 11 | `netPosition()` | um credor só, valor líquido |
+| 12 | `confirmPayment` pelo devedor | reverte por saldo zero |
+| 13 | `confirmPayment` pelo credor | crédito queimado |
+| 14 | `agreeOn` pelos dois com o mesmo vencedor | liquida sem o juiz |
+| 15 | `refundExpired` antes do prazo | reverte `DeadlineNotReached` |
 
-Metade são casos que **devem** reverter. Um contrato testado só no caminho feliz
-não está testado.
+Boa parte são casos que **devem** reverter. Um contrato testado só no caminho
+feliz não está testado.
 
 ---
 
 ## Limitações conhecidas
 
-1. **Sem garantia de pagamento** — é o desenho, não um bug.
-2. **Auto-aposta ainda é possível em grupo coordenado.** A exigência de
-   adversários distintos encarece, não impede. Ver modelagem §7.2.
-3. **Atestação depende de auditoria externa.**
-4. **Owner único** — deveria ser multisig.
-5. **A página não pagina eventos.** Com milhares de apostas, o `queryFilter`
-   único precisaria ser quebrado em faixas de blocos.
-6. **`grossWon` e `distinctOpponents` crescem sem limpeza.** Storage por época
-   nunca é liberado. Aceitável no volume esperado; num uso grande valeria
-   arquivar épocas antigas.
+1. **Juiz é ponto de confiança** — ver modelagem §7.1.
+2. **Mesa de dois** — a compensação depende disso.
+3. **`chipsInEscrow()` percorre todas as apostas.** É `view`, então não custa gás
+   em transação, mas com milhares de apostas ficaria pesado para o nó.
+4. **Sem paginação no painel** — `getBet` é chamado uma vez por aposta.
+5. **Tesouraria também é jogador** — dano nulo porque a ficha é fictícia.
 
 ---
 

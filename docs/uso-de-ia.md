@@ -13,142 +13,120 @@ Ferramenta: **Claude (Anthropic)**, via Claude Code.
 
 | Etapa | Quem fez |
 |---|---|
-| Escolha da ideia (aposta entre pares) e do tipo de token | eu |
-| Definição dos parâmetros e do mecanismo de lastro | eu, com a IA levantando trade-offs |
+| Escolha da ideia e dos papéis da mesa | eu |
 | **Corte de escopo** — decidir o que não construir | eu |
-| Redação do contrato e da página de ranking | IA, a partir da modelagem fechada |
+| Levantamento de trade-offs antes de cada decisão | IA, provocada por perguntas minhas |
+| Redação dos contratos e do painel | IA, a partir da modelagem fechada |
 | Revisão linha a linha, aceitação e correção | eu |
 | Deploy, testes na Sepolia e vídeo | eu |
 
-A ordem importa: **a modelagem veio antes do código**. O prompt de geração
-recebeu a modelagem pronta como especificação, em vez de pedir "faça uma
-stablecoin" e depois inventar uma justificativa para o que saísse.
+A ordem importa: **a modelagem veio antes do código**, e o prompt de geração
+recebeu a modelagem pronta como especificação.
 
 ---
 
-## 2. Prompts principais
+## 2. O projeto mudou de forma quatro vezes
 
-**Prompt 1 — o mecanismo, antes de qualquer código**
+Esse é o registro mais honesto que posso dar do processo. As versões
+intermediárias existiram, funcionaram e foram descartadas:
 
-> Quero uma stablecoin usada para pagar apostas entre colegas de faculdade.
-> Antes de código: o que num contrato ERC-20 impede o emissor de emitir mais do
-> que tem em reserva? Aponte também o que **não** fica garantido.
+| Versão | O que era | Por que caiu |
+|---|---|---|
+| 1 | Governance token de assembleia estudantil | Troquei de ideia: queria algo que eu fosse usar de verdade. |
+| 2 | Stablecoin com reserva atestada + escrow com árbitro | O escrow era complexidade desproporcional para aposta de R$ 20 entre colegas. |
+| 3 | Stablecoin + `settleBet` auto-declaratório + prêmio mensal de 5% | O prêmio era **farmável**: duas carteiras minhas fabricariam vitórias por 5% de custo. Mitiguei exigindo adversários distintos, mas a mitigação encarecia sem eliminar. |
+| **4** | **Dois tokens, mesa de dois com juiz e custódia** | Com jogadores fixos e um juiz que nunca é parte, a auto-aposta **deixa de existir** — não é mitigada, é impossível. |
 
-Daqui saiu a invariante `totalSupply <= reservesAttested` como coração do
-contrato, a distinção entre *atestação* (promessa auditável) e *prova* (que não
-existe on-chain para reserva fiduciária), e a validade de 30 dias da atestação.
+A pergunta que fechou o desenho foi perceber que a versão 3 declarava reserva
+bancária numa rede de teste: eu estava atestando uma reserva que não existe. O
+lastro em **obrigação reconhecida** é menos ambicioso e verdadeiro.
 
-**Prompt 2 — o enquadramento do problema**
+---
+
+## 3. Prompts principais
+
+**Prompt 1 — o enquadramento, antes de qualquer código**
 
 > No Brasil, o que torna difícil cobrar uma aposta informal entre duas pessoas?
 > É fundamento jurídico ou só questão social?
 
-Daqui veio o **art. 814 do Código Civil** — dívida de jogo ou aposta é obrigação
-natural e não é exigível em juízo. Isso reposicionou a modelagem inteira e virou
-o argumento de abertura do vídeo.
+Daqui veio o **art. 814 do Código Civil**. Isso reposicionou o projeto inteiro:
+se não existe execução forçada nem em tese, o objetivo deixa de ser cobrança e
+passa a ser *registro que o devedor não consegue manipular*. Virou o argumento de
+abertura do vídeo.
 
-**Prompt 3 — geração do contrato**
+**Prompt 2 — antes de aceitar a ideia do prêmio**
 
-> Gere um ERC-20 em Solidity ^0.8.20 com OpenZeppelin v5: "InteliBet"/IBET,
-> decimals 2, sem teto fixo de supply, prova de reserva (valor + hash +
-> timestamp) com validade, mint restrito ao owner e validado contra a reserva,
-> redeem que queima e registra o pedido, e uma função `settleBet` que transfere
-> e emite um evento marcando a transferência como pagamento de aposta. Custom
-> errors, superfície ERC-20 intacta.
+> Quero que cada aposta deixe 5% num pote e o maior ganhador do mês leve. Antes
+> de implementar: quais problemas isso cria?
 
-**Prompt 4 — revisão adversarial**
+Três respostas que desmontaram a versão literal: taxa em toda transferência
+quebra o ERC-20; ranking por saldo líquido não é mantível on-chain (líquido
+desce, e achar o novo líder exigiria varrer todos os participantes); e o prêmio é
+farmável. Perguntar "quais problemas isso cria?" **antes** de pedir código rendeu
+mais que qualquer revisão depois.
 
-> Revise procurando: caminhos para registrar uma derrota na conta de outra
-> pessoa; e se o ranking consegue distinguir aposta paga de transferência
-> comum.
+**Prompt 3 — a arquitetura dos dois tokens**
 
-Dois achados que mudaram o resultado:
+> Ficha fictícia para apostar e um segundo token que representa o que precisa ser
+> pago de verdade. Como modelar isso sem que os dois acumulem saldo e ninguém
+> saiba quem deve a quem?
 
-1. **`settleBet` precisa debitar `msg.sender`.** Uma versão com parâmetro
-   `loser` explícito permitiria plantar derrota na conta alheia. Com
-   `_transfer(msg.sender, ...)`, quem paga é necessariamente quem chama.
-2. **Descrição obrigatória e limitada.** Sem limite superior o evento vira
-   depósito de lixo e a página fica ilegível; sem limite inferior, alguém
-   registra aposta sem dizer sobre o quê. Ficou `0 < len <= 200`.
+Daqui saiu a **compensação**: abater a dívida contrária antes de emitir, e a
+invariante de que no máximo um dos dois tem saldo.
 
-**Prompt 5 — o mecanismo de premio**
+**Prompt 4 — geração**
 
-> Quero que cada aposta paga deixe 5% num pote e que o maior ganhador do mes
-> leve o pote. Antes de implementar: quais problemas isso cria?
+> Gere dois contratos ERC-20 em Solidity ^0.8.20 com OpenZeppelin v5, num
+> arquivo: a ficha com custódia de apostas, papéis fixos (dois jogadores e um
+> juiz), acordo mútuo dispensando o juiz, e época de mês de calendário; e o
+> crédito não transferível, emitido só pelo contrato da ficha. Custom errors.
 
-Foi o prompt mais util de todos, porque a resposta desmontou a versao literal da
-ideia em tres pontos:
+**Prompt 5 — revisão adversarial**
 
-1. **Taxa em toda transferencia quebra o token.** Um ERC-20 *fee on transfer*
-   entrega menos do que foi mandado e quebra carteira, exchange e qualquer
-   contrato que faca conta antes de transferir. Movi a taxa para dentro do
-   `settleBet` — aposta paga tem rake, transferencia comum nao.
-2. **Ranking por saldo liquido nao e mantivel on-chain.** Liquido desce quando
-   alguem perde, e achar o novo lider exigiria varrer todos os participantes
-   dentro de uma transacao. Troquei para ganho bruto, que so sobe: manter o
-   lider virou uma comparacao de uma linha.
-3. **O premio e farmavel.** Como `settleBet` e auto-declaratorio, duas carteiras
-   minhas fabricam vitorias por 5% de custo. Implementei a mitigacao de
-   adversarios distintos e registrei que ela encarece sem eliminar.
+> Procure: caminhos em que ficha fique presa no contrato; formas de criar crédito
+> sem aposta; e se o devedor consegue reduzir a própria dívida.
 
-Nenhum dos tres apareceu na ideia original. Perguntar "quais problemas isso
-cria?" **antes** de pedir codigo rendeu mais que qualquer revisao posterior.
+Achados que mudaram o código:
+
+1. **`refundExpired` precisa ser pública.** Na primeira versão só o juiz podia
+   acionar — o que reintroduzia exatamente a dependência que a função existe para
+   eliminar: juiz sumido prenderia o dinheiro dos dois para sempre.
+2. **O crédito precisa nascer dentro do contrato da ficha**, não ser publicado
+   separado e autorizado depois. `new InteliCredit(address(this))` no construtor
+   elimina a janela em que o token existiria sem controlador correto.
+3. **`confirmPayment` só pelo credor.** A versão inicial deixava qualquer um dos
+   dois chamar, o que permitiria ao devedor apagar a própria dívida.
 
 ---
 
-## 3. O que foi rejeitado
-
-### O corte grande: custódia e árbitro
-
-Uma versão anterior deste projeto tinha um segundo contrato, `BetEscrow`, com
-custódia prévia das duas entradas, árbitro neutro obrigatório, prazo, reembolso
-automático e máquina de estados de cinco status. Funcionava, e a IA a produziu
-inteira.
-
-**Cortei.** Três motivos, nesta ordem:
-
-1. **Complexidade desproporcional.** ~200 linhas, dois contratos, três contas com
-   gás, dezessete passos de deploy — para uma aposta de R$ 20 entre colegas.
-2. **A garantia que ela oferecia era menor do que parecia.** Custódia resolve o
-   calote, mas cria dependência de um árbitro humano, que é um novo ponto de
-   confiança e um novo jeito de o sistema falhar.
-3. **O art. 814 já dizia que garantia jurídica não existiria.** Assumir isso e
-   trocar por garantia reputacional é mais honesto do que simular uma execução
-   que a lei não reconhece.
-
-O que sobrou no lugar: `settleBet` e um ranking público. Dez linhas de contrato e
-um arquivo HTML. **A decisão de não construir foi a decisão de projeto mais
-importante desta entrega**, e ela é minha, não do modelo — a IA produz o que se
-pede, e o que se pede a mais ela não recusa.
-
-### Os cortes menores
+## 4. O que foi rejeitado
 
 | Sugestão | Por que recusei |
 |---|---|
-| `decimals = 18` por padrão | Uma stablecoin de real precisa parear com o centavo. 18 casas criariam saldos impossíveis de pagar no resgate. |
-| Teto fixo de supply (`MAX_SUPPLY`) | Faz sentido em token de governança, é defeito em stablecoin: o supply precisa acompanhar a reserva nas duas direções. |
-| `attestReserves` validando `amount >= totalSupply()` | Impediria registrar subcolateralização. Se a reserva cai abaixo do supply, isso tem que ser **visível**, não impossível de declarar. |
-| `ERC20Pausable` + lista de contas congeladas | Compliance de stablecoin operada comercialmente. Aqui só aumentaria a superfície do contrato sem servir ao problema. |
-| Ranking com backend e banco de dados | Mataria o argumento central: a página não pode ter poder nenhum. Ficou HTML estático lendo eventos. |
-| Percentual para a tesouraria em cada aposta | Transformaria o projeto em casa de apostas, que é exatamente o que a modelagem recusa ser. |
-| Taxa incidindo em `transfer` (a ideia literal) | Quebra o ERC-20. Ficou só no `settleBet`. |
-| Ranking do prêmio por saldo líquido | Não é mantível on-chain sem varrer todos os participantes. Ficou ganho bruto. |
-| Pote queimado quando ninguém é elegível | Desincentiva participar justamente nos meses fracos. Ficou rolagem para a época seguinte. |
-| `epochDuration` como constante de 30 dias | Impediria demonstrar o prêmio num vídeo de 10 minutos. Virou parâmetro de deploy. |
-| Owner podendo sacar o pote "em caso de problema" | Destruiria a única garantia forte do mecanismo. Não existe essa função. |
+| `decimals = 18` por padrão | O crédito pareia com o centavo do real; 18 casas criariam saldos impossíveis de pagar. |
+| Taxa incidindo em `transfer` | Quebra o ERC-20: token que entrega menos do que foi mandado quebra carteira, exchange e qualquer contrato que faça conta antes de transferir. |
+| Manter o prêmio mensal de 5% | Numa mesa de dois, o pote é dinheiro andando em círculo — e obrigaria a explicar por que existe rake com dois jogadores. |
+| Crédito transferível | Deixaria de ser registro de obrigação e viraria dinheiro. A restrição é o que define o token. |
+| Escrow embutido com árbitro escolhido por aposta | Complexidade desproporcional. Com papéis fixos, o mesmo resultado sai muito mais simples. |
+| Owner podendo ajustar dívida "em caso de erro" | Destruiria a única garantia forte do sistema. |
+| Reserva atestada para a ficha | Atestar reserva inexistente em rede de teste é teatro. A ficha assume ser fictícia. |
 
 ---
 
-## 4. Verificação independente
+## 5. Verificação independente
 
 Nada foi aceito por confiança na saída do modelo. Antes do deploy:
 
 - leitura linha a linha contra a documentação da OpenZeppelin v5, em particular
-  a substituição de `_beforeTokenTransfer` por `_update` e o construtor do
-  `Ownable`, que mudou da v4 para a v5;
-- conferência de cada parâmetro contra a tabela de modelagem;
+  `_update` como ponto único de movimentação e o construtor do `Ownable`, que
+  mudou da v4 para a v5;
+- **a aritmética de calendário foi portada para Python e comparada com
+  `datetime` dia a dia de 2024 a 2031**, mais bordas de bissexto e virada de
+  século: zero divergências. Era o trecho com maior risco de erro silencioso —
+  um bug ali daria mês errado sem reverter nada;
 - execução da matriz de cenários de
-  [`implementacao.md §7`](implementacao.md#7-matriz-de-verificação-antes-do-deploy)
-  na Sepolia, incluindo os casos que **devem reverter**.
+  [`implementacao.md §12`](implementacao.md#12-matriz-de-verificação-antes-do-deploy)
+  na Sepolia, incluindo os casos que **devem** reverter.
 
 Um contrato testado só no caminho feliz não está testado.
