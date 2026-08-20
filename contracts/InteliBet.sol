@@ -43,9 +43,18 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
  *            A taxa tambem NAO afeta o peg: o valor sai de uma conta e entra
  *            na do proprio contrato. O supply nao muda.
  *
- *         4. A IDENTIDADE, por `setName`. A blockchain so conhece enderecos;
- *            o painel precisa de nomes. Cada pessoa registra o PROPRIO nome,
- *            com `msg.sender` como chave — ninguem nomeia outra pessoa.
+ *         4. A IDENTIDADE, em duas camadas. A blockchain so conhece
+ *            enderecos; o painel precisa de nomes.
+ *
+ *            `setName` e AUTO-DECLARACAO: `msg.sender` e a chave, entao so
+ *            voce nomeia a si mesmo, e esse nome tem precedencia sobre
+ *            qualquer outro.
+ *
+ *            `settleBet` aceita um nome para o vencedor, usado apenas quando
+ *            ele ainda NAO TEM NOME NENHUM. Serve para quem recebe uma aposta
+ *            sem nunca ter interagido com o contrato aparecer no painel com
+ *            nome em vez de endereco. Nao sobrescreve nada: nome atribuido
+ *            por terceiro cede assim que a pessoa se declara.
  *
  *         Nao ha custodia nem arbitro. Divida de aposta nao e exigivel em
  *         juizo (art. 814 do Codigo Civil), entao a garantia aqui e
@@ -129,8 +138,11 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
 
     // --- Identidade ------------------------------------------------------
 
-    /// @dev Nome escolhido por cada endereco. Vazio quando nao registrado.
+    /// @dev Nome de cada endereco. Vazio quando nao ha nome.
     mapping(address => string) private _names;
+
+    /// @dev Se o nome foi declarado pela propria carteira ou atribuido por terceiro.
+    mapping(address => bool) private _selfDeclared;
 
     // --- Eventos ---------------------------------------------------------
 
@@ -160,6 +172,7 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
     event PrizeRolledOver(uint256 indexed epoch, uint256 amount, uint256 toEpoch);
 
     event NameSet(address indexed account, string name);
+    event NameAttributed(address indexed account, string name, address indexed by);
     event NameCleared(address indexed account);
 
     // --- Erros -----------------------------------------------------------
@@ -278,35 +291,56 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
      *         nem apagar o nome de ninguem.
      */
     function setName(string calldata name) external {
-        uint256 len = bytes(name).length;
-        if (len == 0 || len > MAX_NAME_LENGTH) revert InvalidName(len, MAX_NAME_LENGTH);
+        _validateName(name);
 
         _names[msg.sender] = name;
+        _selfDeclared[msg.sender] = true;
+
         emit NameSet(msg.sender, name);
     }
 
     /// @notice Apaga o proprio nome. Volta a aparecer so o endereco.
     function clearName() external {
         delete _names[msg.sender];
+        delete _selfDeclared[msg.sender];
+
         emit NameCleared(msg.sender);
     }
 
-    /// @notice Nome de um endereco. String vazia quando nao ha registro.
+    /// @notice Nome de um endereco. String vazia quando nao ha nome.
     function nameOf(address account) external view returns (string memory) {
         return _names[account];
     }
 
+    /// @notice Se aquele nome foi declarado pela propria carteira.
+    function isSelfDeclared(address account) external view returns (bool) {
+        return _selfDeclared[account];
+    }
+
     /**
-     * @notice Nomes de varios enderecos de uma vez.
+     * @notice Nomes de varios enderecos de uma vez, com a origem de cada um.
      * @dev    O painel precisa dos nomes de todos os participantes do ranking;
-     *         uma chamada em lote evita N idas ao no para N pessoas.
+     *         uma chamada em lote evita N idas ao no para N pessoas. O segundo
+     *         retorno permite marcar na tela o que ainda nao foi confirmado
+     *         pela propria carteira.
      */
-    function namesOf(address[] calldata accounts) external view returns (string[] memory names) {
+    function namesOf(address[] calldata accounts)
+        external
+        view
+        returns (string[] memory names, bool[] memory selfDeclared)
+    {
         names = new string[](accounts.length);
+        selfDeclared = new bool[](accounts.length);
 
         for (uint256 i = 0; i < accounts.length; i++) {
             names[i] = _names[accounts[i]];
+            selfDeclared[i] = _selfDeclared[accounts[i]];
         }
+    }
+
+    function _validateName(string calldata name) private pure {
+        uint256 len = bytes(name).length;
+        if (len == 0 || len > MAX_NAME_LENGTH) revert InvalidName(len, MAX_NAME_LENGTH);
     }
 
     // --- Epocas ----------------------------------------------------------
@@ -343,8 +377,16 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
      *         manter o lider e uma comparacao de uma linha. Saldo liquido
      *         desceria quando alguem perde, e achar o novo lider exigiria
      *         varrer todos os participantes — impossivel numa transacao.
+     *
+     * @param winnerName Nome para o vencedor, ou string vazia para nao mexer.
+     *        So e aplicado se ele ainda nao tiver NENHUM nome: nao sobrescreve
+     *        auto-declaracao nem atribuicao anterior. Serve para quem recebe
+     *        uma aposta sem nunca ter usado o contrato aparecer no painel com
+     *        nome — e ele pode trocar depois, chamando `setName`.
      */
-    function settleBet(address winner, uint256 amount, string calldata description) external {
+    function settleBet(address winner, uint256 amount, string calldata description, string calldata winnerName)
+        external
+    {
         if (winner == address(0)) revert ZeroAddress();
         if (winner == msg.sender || winner == address(this)) revert InvalidCounterparty();
 
@@ -364,6 +406,13 @@ contract InteliBet is ERC20, ERC20Burnable, Ownable {
 
         prizePool[epoch] += fee;
         _registerWin(epoch, winner, msg.sender, amount);
+
+        if (bytes(winnerName).length > 0 && bytes(_names[winner]).length == 0) {
+            _validateName(winnerName);
+            _names[winner] = winnerName;
+
+            emit NameAttributed(winner, winnerName, msg.sender);
+        }
 
         emit BetSettled(msg.sender, winner, amount, fee, epoch, description);
     }

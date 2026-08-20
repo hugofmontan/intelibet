@@ -132,13 +132,13 @@ Cenário: a Conta B perdeu uma aposta de 20,00 IBET para a Conta A.
 
 | # | Chamada | Conta | Resultado |
 |---|---|---|---|
-| 9 | `settleBet` → `<A>`, `2000`, `"Inteli vence o interclasses"` | **B** | A recebe `1900`, o contrato fica com `100` |
+| 9 | `settleBet` → `<A>`, `2000`, `Inteli vence o interclasses`, `Hugo` | **B** | A recebe `1900`, o contrato fica com `100` |
 | 10 | `prizePool` → `0` | — | `100` — o pote da época zero |
 | 11 | `balanceOf` → `<endereço do contrato>` | — | `100` |
 | 12 | `grossWon` → `0`, `<A>` | — | `2000` — ranking por **bruto**, não pelo líquido recebido |
 | 13 | `epochLeader` → `0` | — | endereço da Conta A |
-| 14 | `settleBet` → `<B>`, `1000`, `"teste"` | B | **reverte `InvalidCounterparty`** |
-| 15 | `settleBet` → `<A>`, `10`, `"x"` | B | **reverte `AmountTooSmall(10, 20)`** |
+| 14 | `settleBet` → `<B>`, `1000`, `teste`, `` | B | **reverte `InvalidCounterparty`** |
+| 15 | `settleBet` → `<A>`, `10`, `x`, `` | B | **reverte `AmountTooSmall(10, 20)`** |
 
 No Etherscan, a transação do passo 9 mostra **dois `Transfer`** (um para a
 Conta A, um para o contrato) e o `BetSettled` com o campo `fee`. Boa tela para

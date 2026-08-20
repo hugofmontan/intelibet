@@ -70,6 +70,7 @@
     border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
   }
   .tag.ok { color: var(--pos); border-color: var(--pos); }
+  .atrib { color: var(--muted); cursor: help; font-size: .8em; }
 
   .msg { padding: 2rem 1.1rem; text-align: center; color: var(--muted); }
   .msg code, .sub code {
@@ -94,8 +95,9 @@
       Montado direto da blockchain. Cada linha vem de um evento
       <code>BetSettled</code> na rede Sepolia — nada aqui é digitado à mão.
       5% de cada aposta paga vai para o pote da época; quem mais ganhar leva.
-      Os nomes são auto-declarados — cada pessoa registra o próprio, e ninguém
-      consegue nomear outra.
+      Nomes com <sup class="atrib">°</sup> foram atribuídos por quem pagou a
+      aposta; os demais foram declarados pela própria carteira, que sempre tem
+      precedência.
     </p>
   </header>
 
@@ -148,7 +150,7 @@ const ABI = [
   "function prizePool(uint256) view returns (uint256)",
   "function epochLeader(uint256) view returns (address)",
   "function minDistinctOpponents() view returns (uint32)",
-  "function namesOf(address[] accounts) view returns (string[])"
+  "function namesOf(address[] accounts) view returns (string[] names, bool[] selfDeclared)"
 ];
 
 const DECIMAIS = 2;
@@ -161,13 +163,21 @@ const curto = (a) => a.slice(0, 6) + "…" + a.slice(-4);
 let NOMES_ONCHAIN = {};   // preenchido a cada carga, via namesOf() do contrato
 const nome = (a) => {
   const k = a.toLowerCase();
-  return NOMES_ONCHAIN[k] || APELIDOS[a] || APELIDOS[k] || null;
+  return NOMES_ONCHAIN[k]?.nome || APELIDOS[a] || APELIDOS[k] || null;
+};
+/** true quando o nome veio de terceiro e a própria carteira ainda não confirmou. */
+const nomeAtribuido = (a) => {
+  const e = NOMES_ONCHAIN[a.toLowerCase()];
+  return !!e && !e.proprio;
 };
 
 function linkConta(a) {
   const apelido = nome(a);
+  const marca = nomeAtribuido(a)
+    ? `<sup class="atrib" title="Nome atribuído por outra pessoa numa aposta. A própria carteira ainda não confirmou.">°</sup>`
+    : "";
   const label = apelido
-    ? `<span class="who">${escapar(apelido)}</span> <span class="addr">${curto(a)}</span>`
+    ? `<span class="who">${escapar(apelido)}${marca}</span> <span class="addr">${curto(a)}</span>`
     : `<span class="addr">${curto(a)}</span>`;
   return `<a href="${EXPLORER}/address/${a}" target="_blank" rel="noopener">${label}</a>`;
 }
@@ -178,8 +188,10 @@ async function carregarNomes(contrato, enderecos) {
   if (!enderecos.length) return;
 
   try {
-    const nomes = await contrato.namesOf(enderecos);
-    enderecos.forEach((a, i) => { if (nomes[i]) NOMES_ONCHAIN[a.toLowerCase()] = nomes[i]; });
+    const [nomes, proprios] = await contrato.namesOf(enderecos);
+    enderecos.forEach((a, i) => {
+      if (nomes[i]) NOMES_ONCHAIN[a.toLowerCase()] = { nome: nomes[i], proprio: proprios[i] };
+    });
   } catch (erro) {
     console.warn("não consegui ler os nomes, usando o mapa local:", erro);
   }
