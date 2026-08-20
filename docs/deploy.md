@@ -176,10 +176,10 @@ com o código publicado.
 | Item | Valor |
 |---|---|
 | Rede | Sepolia (chainId 11155111) |
-| `InteliBet` (ficha) | `0x` |
-| `InteliCredit` (crédito) | `0x` |
-| Bloco do deploy | |
-| Tx de deploy | `0x` |
+| `InteliBet` (ficha) | `0x57DeD57F8ebA2db718c6426D36E7Ff37Bf675d1f` |
+| `InteliCredit` (crédito) | `0x9aA324854f9c671d1FaC128be9F35091599eB12A` |
+| Bloco do deploy | 11530652 |
+| Tx de deploy | `0x6dcdc2abdfd20cab2d96ea91773760809875dc08f21f394b028d14bfb154cf62` |
 | **Tx de transferência entre carteiras** | `0x` |
 | Tx `resolveBet` (juiz) | `0x` |
 | Tx `agreeOn` (acordo) | `0x` |

@@ -161,8 +161,8 @@ dívida e a extinção dela, não move dinheiro de verdade.
 | Item | Valor |
 |---|---|
 | Rede | Sepolia (chainId 11155111) |
-| Ficha `InteliBet` | `0x` |
-| Crédito `InteliCredit` | `0x` |
+| Ficha `InteliBet` | [`0x57DeD57F8ebA2db718c6426D36E7Ff37Bf675d1f`](https://sepolia.etherscan.io/address/0x57DeD57F8ebA2db718c6426D36E7Ff37Bf675d1f) |
+| Crédito `InteliCredit` | [`0x9aA324854f9c671d1FaC128be9F35091599eB12A`](https://sepolia.etherscan.io/address/0x9aA324854f9c671d1FaC128be9F35091599eB12A) |
 | Jogador A (Hugo) | `0xf6e3a81cf77979eeac3874fc8245573c92e8eaf0` |
 | Jogador B (Leon) | `0xf4a3d4add2c15df016e66138ad96f30302b0134d` |
 | Juiz (Rodrigo) | `0x6d240b001307b577500195846af94dbaf0061fe4` |
