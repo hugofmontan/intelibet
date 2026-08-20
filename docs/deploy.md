@@ -217,11 +217,11 @@ sacar o pote". As duas afirmações só são verificáveis com o código publica
 | Item | Valor |
 |---|---|
 | Rede | Sepolia (chainId 11155111) |
-| Contrato `InteliBet` | `0xed37b31a32d3d498ab75751add0057f28e05f062` |
-| Bloco do deploy | 11525419 |
+| Contrato `InteliBet` | `0x7cbf98af02e0951ffebf9213d973f4ca3882040f` |
+| Bloco do deploy | 11529788 |
 | `epochDuration` usado | 600 (10 minutos) |
 | `minDistinctOpponents` usado | 1 |
-| Tx de deploy | `0x585101a8ae06df7d1c8a04b28a7080e4c2a1a9ef01d102c69df21892ada62382` |
+| Tx de deploy | `0xe3d03854ffdfdae60ba73d8661c3660ad79dae8e457aa961be297fcb005ad800` |
 | Tx `attestReserves` | `0x` |
 | Tx `mint` | `0x` |
 | **Tx de transferência A → B** | `0x` |
@@ -230,7 +230,7 @@ sacar o pote". As duas afirmações só são verificáveis com o código publica
 | Conta A (tesouraria) | `0xf6e3a81cf77979eeac3874fc8245573c92e8eaf0` |
 | Conta B | `0x` |
 | URL do ranking (GitHub Pages) | https://hugofmontan.github.io/intelibet/ |
-| Código verificado | Etherscan ✅ · Sourcify ✅ · Blockscout ✅ |
+| Código verificado | Sourcify ✅ · Blockscout ✅ · Etherscan: reenviar pelo plugin |
 | Data/hora do deploy | |
 
 Capturas em [`../assets/`](../assets/): `deploy.png` · `revert-reserva.png` ·
