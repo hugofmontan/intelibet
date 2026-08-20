@@ -222,6 +222,54 @@
   .bar.l { background: var(--accent); }
   .bar.n { background: var(--pos); }
 
+  /* ---------- linha do tempo ---------- */
+  .tl { margin: 1.4rem 0 1.8rem; border-left: 2px solid var(--line); padding-left: 1.3rem; }
+  .tl .ev {
+    position: relative; padding: .8rem 0; border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: 1fr auto; gap: .5rem 1rem; align-items: center;
+  }
+  .tl .ev:last-child { border-bottom: 0; }
+  .tl .ev::before {
+    content: ""; position: absolute; left: -1.68rem; top: 1.25rem;
+    width: .5rem; height: .5rem; border-radius: 50%;
+    background: var(--line); box-shadow: 0 0 0 3px var(--bg);
+  }
+  .tl .ev.marco::before { background: var(--accent); }
+  .tl .dia {
+    font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: .15rem;
+  }
+  .tl .txt { font-size: .93rem; }
+  .tl .saldo {
+    font-size: .75rem; font-variant-numeric: tabular-nums; white-space: nowrap;
+    padding: .2rem .6rem; border-radius: 100px; border: 1px solid currentColor;
+  }
+  .tl .saldo.h { color: var(--info); }
+  .tl .saldo.l { color: var(--accent); }
+  .tl .saldo.z { color: var(--pos); }
+  @media (max-width: 560px) {
+    .tl .ev { grid-template-columns: 1fr; }
+    .tl .saldo { justify-self: start; }
+  }
+
+  /* ---------- estrutura do contrato ---------- */
+  .sig { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .82rem; }
+  td.sig { white-space: nowrap; }
+  .quem { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+  .quem.todos { color: var(--pos); }
+  .quem.jog { color: var(--info); }
+  .quem.juiz { color: var(--warn); }
+  .quem.tes { color: var(--accent); }
+  .quem.ninguem { color: var(--neg); }
+
+  pre.code {
+    background: var(--sunken); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1rem 1.15rem; margin: 1.2rem 0; overflow-x: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: .82rem; line-height: 1.65;
+  }
+  pre.code .cm { color: var(--muted); }
+
   footer { margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .87rem; }
   footer a { color: var(--muted); }
   footer .addr { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; word-break: break-all; }
@@ -396,6 +444,96 @@
     bastante — o limiar de acerto, definido no deploy.
   </p>
 
+  <h2>Um mês na mesa</h2>
+
+  <p>
+    A compensação é fácil de entender numa linha e difícil de sentir sem ver
+    correndo. Abaixo, um mês inteiro de mesa com limiar de acerto em
+    <b>R$ 100</b>. A etiqueta da direita é o saldo de crédito depois de cada
+    evento — e ela nunca mostra dois nomes ao mesmo tempo.
+  </p>
+
+  <div class="tl">
+    <div class="ev">
+      <div>
+        <div class="dia">Dia 2</div>
+        <div class="txt">Hugo propõe <b>R$ 30</b> — "quem entrega a ponderada primeiro". Leon aceita. As duas entradas travam no contrato.</div>
+      </div>
+      <span class="saldo z">ninguém deve</span>
+    </div>
+    <div class="ev">
+      <div>
+        <div class="dia">Dia 5</div>
+        <div class="txt">Leon entregou antes. Os dois votam igual em <code>agreeOn</code> e a aposta liquida <b>sem o juiz</b>.</div>
+      </div>
+      <span class="saldo l">Leon · R$ 30</span>
+    </div>
+    <div class="ev">
+      <div>
+        <div class="dia">Dia 9</div>
+        <div class="txt">Aposta de <b>R$ 50</b> no clássico. Hugo ganha. Aqui a compensação aparece: queima os 30 do Leon e emite só os 20 que sobram.</div>
+      </div>
+      <span class="saldo h">Hugo · R$ 20</span>
+    </div>
+    <div class="ev">
+      <div>
+        <div class="dia">Dia 14</div>
+        <div class="txt">Aposta de <b>R$ 40</b>, e desta vez eles discordam do que ficou combinado. Rodrigo decide: Leon. O saldo <b>vira de lado</b> sem ninguém pagar nada.</div>
+      </div>
+      <span class="saldo l">Leon · R$ 20</span>
+    </div>
+    <div class="ev">
+      <div>
+        <div class="dia">Dia 18</div>
+        <div class="txt">Hugo propõe <b>R$ 25</b> e Leon não aceita. Passado o prazo, <code>refundExpired</code> devolve a entrada — chamável por qualquer um, inclusive por quem não é da mesa.</div>
+      </div>
+      <span class="saldo l">Leon · R$ 20</span>
+    </div>
+    <div class="ev">
+      <div>
+        <div class="dia">Dia 23</div>
+        <div class="txt">Hugo ganha <b>R$ 90</b>. Abate os 20 do Leon, emite 70.</div>
+      </div>
+      <span class="saldo h">Hugo · R$ 70</span>
+    </div>
+    <div class="ev marco">
+      <div>
+        <div class="dia">Dia 27</div>
+        <div class="txt">Hugo ganha mais <b>R$ 45</b>. Leon não tem crédito a abater, então emite os 45 inteiros — e o saldo <b>cruza o limiar</b>. O contrato emite <code>SettlementDue</code>.</div>
+      </div>
+      <span class="saldo h">Hugo · R$ 115</span>
+    </div>
+    <div class="ev marco">
+      <div>
+        <div class="dia">Dia 28</div>
+        <div class="txt">Leon faz <b>um Pix de R$ 115</b>. Hugo, que é quem sabe se o dinheiro chegou, chama <code>confirmPayment(115)</code> e o crédito é queimado.</div>
+      </div>
+      <span class="saldo z">ninguém deve</span>
+    </div>
+    <div class="ev">
+      <div>
+        <div class="dia">Dia 1º do mês seguinte</div>
+        <div class="txt">A época vira à meia-noite UTC. O <b>placar do mês</b> recomeça do zero; a conta, não — ela nunca zera por calendário, só por pagamento.</div>
+      </div>
+      <span class="saldo z">ninguém deve</span>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>O mês inteiro em uma frase:</b> seis apostas criadas, cinco resolvidas,
+    R$ 255 disputados — e <b>um único Pix</b>, de R$ 115. É isso que a
+    compensação compra. Sem ela seriam cinco cobranças, cada uma com sua
+    conversa, e um placar em que os dois teriam saldo a receber ao mesmo tempo.
+  </div>
+
+  <p>
+    Repare também no que <i>não</i> aconteceu. O juiz entrou uma vez em cinco
+    apostas resolvidas — nas outras quatro os dois concordaram e ele nem foi
+    acionado. Uma aposta morreu sem que ninguém decidisse nada, e mesmo assim
+    devolveu o dinheiro. E entre o dia 5 e o dia 27 a dívida trocou de dono três
+    vezes <b>sem que um centavo saísse da conta de ninguém</b>.
+  </p>
+
   <h2>O ciclo de uma aposta</h2>
 
   <figure>
@@ -510,6 +648,237 @@
         exatamente as duas entradas.
       </p>
     </div>
+  </div>
+
+  <hr class="rule">
+
+  <!-- ================= ESTRUTURA DO CONTRATO ================= -->
+
+  <h2>A estrutura do contrato</h2>
+
+  <p>
+    São dois contratos ERC-20 num arquivo só, <code>contracts/InteliBet.sol</code>,
+    em Solidity ^0.8.20 sobre OpenZeppelin v5. Eles não são publicados separado:
+    o <code>InteliBet</code> <b>cria o crédito dentro do próprio construtor</b>.
+  </p>
+
+  <pre class="code"><span class="cm">// última linha do construtor do InteliBet</span>
+credit = new InteliCredit(address(this));</pre>
+
+  <p>
+    Uma linha, duas consequências. Um único deploy publica os dois contratos, e
+    <b>não existe janela</b> em que o token de crédito esteja no ar sem
+    controlador definido — o endereço autorizado a emitir dívida já nasce sendo
+    a mesa, e nunca mais muda, porque <code>controller</code> é
+    <code>immutable</code>.
+  </p>
+
+  <h3>O que é imutável e o que é estado</h3>
+
+  <p>
+    A divisão importa mais do que parece: tudo que define <i>quem é quem</i> e
+    <i>quais são as regras</i> foi gravado no deploy e não tem função para
+    alterar. O que muda com o tempo é só o que a mesa produz.
+  </p>
+
+  <div class="grid g2" style="margin-top:1.2rem">
+    <div class="token-card ficha">
+      <h4>Gravado no deploy</h4>
+      <div class="sym">immutable — não existe setter</div>
+      <ul>
+        <li><code>playerA</code>, <code>playerB</code>, <code>judge</code> — os três papéis</li>
+        <li><code>credit</code> — o endereço do token irmão</li>
+        <li><code>settlementThreshold</code> — o limiar de acerto</li>
+        <li><code>epochDuration</code>, <code>calendarMonths</code>, <code>startTime</code> — o relógio</li>
+      </ul>
+    </div>
+    <div class="token-card credito">
+      <h4>Muda com o uso</h4>
+      <div class="sym">storage — escrito pelas funções</div>
+      <ul>
+        <li><code>_bets[]</code> — o histórico, que só cresce</li>
+        <li><code>agreementVote</code> — o voto de cada um por aposta</li>
+        <li><code>grossWon</code>, <code>betsResolved</code> — o placar por época</li>
+        <li>saldos de ficha e de crédito, nos dois ERC-20</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note">
+    O construtor <b>recusa</b> juiz igual a jogador e jogadores iguais entre si.
+    Como os três são imutáveis, essa checagem roda <b>uma vez, para sempre</b> —
+    em vez de virar uma verificação por aposta que um dia alguém esquece de
+    fazer. Regra que se garante por construção não precisa ser lembrada.
+  </div>
+
+  <h3>Quem pode chamar o quê</h3>
+
+  <div class="card" style="margin-top:1.2rem">
+    <div class="scroll">
+      <table class="who-can">
+        <thead>
+          <tr><th>Função</th><th>Quem chama</th><th>Por quê</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="sig">mintChips</td>
+            <td><span class="quem tes">Tesouraria</span></td>
+            <td>E só para endereço de jogador — ficha fora da mesa não significa nada.</td>
+          </tr>
+          <tr>
+            <td class="sig">createBet · acceptBet</td>
+            <td><span class="quem jog">Jogador</span></td>
+            <td>Deposita a própria entrada no mesmo ato. Não existe aposta sem custódia.</td>
+          </tr>
+          <tr>
+            <td class="sig">agreeOn</td>
+            <td><span class="quem jog">Jogador</span></td>
+            <td>Liquida quando os dois votam igual. É o caminho que dispensa o juiz.</td>
+          </tr>
+          <tr>
+            <td class="sig">resolveBet</td>
+            <td><span class="quem juiz">Juiz</span></td>
+            <td>Decide <b>quem</b> ganhou. Não recebe <i>quanto</i> como parâmetro — não teria onde escrever.</td>
+          </tr>
+          <tr>
+            <td class="sig">cancelBet</td>
+            <td><span class="quem jog">Proponente</span></td>
+            <td>Só quem propôs, e só antes de alguém aceitar.</td>
+          </tr>
+          <tr>
+            <td class="sig">refundExpired</td>
+            <td><span class="quem todos">Qualquer pessoa</span></td>
+            <td>A saída de emergência não pode ter dono: se dependesse do juiz, a inércia dele prenderia o dinheiro dos dois.</td>
+          </tr>
+          <tr>
+            <td class="sig">confirmPayment</td>
+            <td><span class="quem jog">Credor</span></td>
+            <td>Só quem tinha a receber sabe se o Pix chegou.</td>
+          </tr>
+          <tr>
+            <td class="sig">credit.mint · credit.burn</td>
+            <td><span class="quem tes">Só o contrato da mesa</span></td>
+            <td>Nem jogador, nem juiz, nem dono cria dívida por fora.</td>
+          </tr>
+          <tr>
+            <td class="sig">credit.transfer</td>
+            <td><span class="quem ninguem">Ninguém</span></td>
+            <td>Reverte sempre. É o que separa registro de obrigação de dinheiro.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p>
+    Note quem <b>não</b> aparece nessa tabela: não há função de pausa, de saque
+    administrativo, de correção de saldo nem de troca de juiz. A tesouraria
+    emite ficha — que é fictícia — e nada além disso. O poder que o dono não tem
+    é tão parte do desenho quanto o que ele tem.
+  </p>
+
+  <h3>O que uma aposta guarda</h3>
+
+  <pre class="code">struct Bet {
+    address proposer;      <span class="cm">// quem propôs</span>
+    uint128 stake;         <span class="cm">// valor de CADA lado, em centavos</span>
+    uint64  deadline;      <span class="cm">// prazo para aceitar/resolver</span>
+    Status  status;        <span class="cm">// Open · Active · Resolved · Cancelled · Refunded</span>
+    address winner;        <span class="cm">// zero até ser resolvida</span>
+    uint64  resolvedEpoch; <span class="cm">// em qual mês entrou no placar</span>
+    bool    byAgreement;   <span class="cm">// true quando dispensaram o juiz</span>
+    string  terms;         <span class="cm">// a frase, congelada antes do resultado</span>
+}</pre>
+
+  <p>
+    Os tamanhos não são estética. <code>uint128</code> no valor e
+    <code>uint64</code> no prazo existem para que <code>stake</code>,
+    <code>deadline</code> e <code>status</code> caibam <b>num slot só</b> de
+    256 bits, e <code>winner</code>, <code>resolvedEpoch</code> e
+    <code>byAgreement</code> em outro. Uma aposta ocupa três slots mais o texto,
+    em vez de sete — e cada slot a menos é gas que ninguém paga.
+  </p>
+
+  <p>
+    O campo que carrega o projeto é o <code>terms</code>. Ele é escrito na
+    criação e <b>nunca mais</b> — não existe função que o altere. É isso que
+    resolve o "duas semanas depois cada um lembra de um combinado diferente":
+    os termos ficam congelados <i>antes</i> de o resultado existir, e ninguém
+    reescreve o passado.
+  </p>
+
+  <h3>O que o contrato recusa</h3>
+
+  <p>
+    Os erros customizados são a lista de regras escrita ao contrário. Ler o que
+    o contrato rejeita explica o desenho mais rápido do que ler o que ele aceita.
+  </p>
+
+  <div class="card" style="margin-top:1.2rem">
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Erro</th><th>A regra por trás</th></tr></thead>
+        <tbody>
+          <tr><td class="sig">NonTransferable</td><td>Dívida não circula. Nem para terceiro, nem entre os dois.</td></tr>
+          <tr><td class="sig">OnlyController</td><td>Crédito só nasce e morre pela mão da mesa.</td></tr>
+          <tr><td class="sig">DuplicateRole</td><td>Juiz não é jogador, e os dois jogadores são gente diferente.</td></tr>
+          <tr><td class="sig">NotAPlayer</td><td>Quem não senta à mesa não aposta — e nem recebe ficha.</td></tr>
+          <tr><td class="sig">NotTheJudge</td><td>Só um endereço no mundo resolve uma aposta contestada.</td></tr>
+          <tr><td class="sig">WinnerNotInBet</td><td>O juiz não pode premiar quem não estava apostando.</td></tr>
+          <tr><td class="sig">WrongStatus</td><td>A máquina de estados não anda para trás nem pula etapa.</td></tr>
+          <tr><td class="sig">DeadlinePassed<br>DeadlineNotReached</td><td>Cada coisa na sua janela: não se aceita aposta vencida nem se devolve aposta viva.</td></tr>
+          <tr><td class="sig">ZeroAmount</td><td>Aposta de zero não é aposta.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <h3>As três invariantes</h3>
+
+  <div class="card" style="margin-top:1.2rem">
+    <div class="scroll">
+      <table>
+        <thead><tr><th>A garantia</th><th>O que a sustenta no código</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>No máximo um dos dois tem saldo de crédito</b>, em qualquer momento.</td>
+            <td class="sig">_netCredit abate antes de emitir</td>
+          </tr>
+          <tr>
+            <td><b>Nenhuma ficha fica presa no contrato.</b> Todo estado final devolve para alguém.</td>
+            <td class="sig">Resolved · Cancelled · Refunded</td>
+          </tr>
+          <tr>
+            <td><b>O devedor não consegue reduzir a própria dívida.</b> Não existe caminho.</td>
+            <td class="sig">confirmPayment queima do msg.sender</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p>
+    A terceira é a mais fácil de verificar e a mais importante: procure no
+    contrato uma função que queime crédito de outro endereço que não o de quem
+    chamou. Não existe. <code>confirmPayment</code> queima do
+    <code>msg.sender</code>, e é por isso que o registro vale alguma coisa.
+  </p>
+
+  <h3>Como esta página lê o contrato</h3>
+
+  <p>
+    Tudo que aparece no topo veio de <b>chamadas de leitura</b> ao contrato,
+    feitas no seu navegador contra um RPC público da Sepolia. A página não tem
+    servidor, não tem banco e não guarda nada: <code>tableSummary()</code> traz
+    época, placar do mês, fichas dos dois e posição líquida numa chamada só, e
+    <code>getBet(id)</code> traz cada aposta.
+  </p>
+
+  <div class="note">
+    Se esta página sair do ar, <b>nada se perde</b>. O estado continua na
+    blockchain e qualquer pessoa consulta pelo explorador ou monta outro painel
+    igual. O painel é uma janela, não o registro — e essa diferença é o ponto
+    inteiro de ter posto isso on-chain.
   </div>
 
   <h2>Limites assumidos</h2>
